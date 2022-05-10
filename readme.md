@@ -22,7 +22,7 @@ This proxy model will allow for more efficient reservoir simulations and possibl
 - Analyze distributions, uncertainty, prior/posterior, computational efficiency, etc.
 
 <p align="center">
-  <img src="https://github.com/UT-GEOML/MOMA/blob/main/project/figures/cnn-rnn-architecture.jpg" width="500" height="250" >
+  <img src="https://github.com/misaelmmorales/CNN-RNN-Proxy/blob/main/figures/cnn_rnn_architecture.png" width="500" height="250" >
 </p>
   
 ***
