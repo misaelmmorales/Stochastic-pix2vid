@@ -26,18 +26,3 @@ This proxy model will allow for more efficient reservoir simulations and possibl
 </p>
   
 ***
-## Class Project Guidelines
-
-- Try to use an actual dataset if possible.
-- If you have two different problems in mind, be creative about how to combine them into one project, e.g., different datasets, same ML approach, or same dataset, different ML techniques.
-- Use a Jupyter notebook to document your workflow.
-- Briefly describe the problem that you are trying to solve and why you think your approach is (or has the potential to be) a step forward.
-- Do some exploratory data analysis before getting into developing the ML model.
-- If you use deep learning, you will probably need access to a GPU for training your model. Google Colab is a good solution for this.
-- Document model performance during training.
-- Document model performance on the test data.
-- Discuss whether the model provides a better and/or faster solution then previous approaches. Also, what improvements are necessary / possible with further work?
-- Discuss whether there is any bias in the training data and how well might the model generalize to larger and broader datasets.
-- Prepare a short presentation about the project.
-- In your presentation, indicate the contribution of each team member to the project.
-- Deliverables will be: (1) the Jupyter notebook and (2) the presentation.
