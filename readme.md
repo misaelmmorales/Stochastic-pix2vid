@@ -10,7 +10,7 @@ Using this as training data, we fit a CNN-RNN model to learn how to forecast dyn
 
 This proxy model will allow for more efficient reservoir simulations and possible applications in uncertainty quantification, history matching, and more.
 
-- Gather SPE10 static properties from MRST co2lab
+- Gather SPE10 petrphysical properties from MRST spe10, and fluid properties from MRST co2lab
 - Generate ensemble of realizations (porosity, permeability) by grid partitioning.
 - Perform reservoir simulation to generate dynamic states (pressure, saturation).
 - Gather inputs and outputs as <code>.m</code> file, and import into Jupyter notebook using <code>SciPy</code> or <code>HDF5</code>.
