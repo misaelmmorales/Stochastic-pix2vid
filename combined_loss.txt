@@ -1,0 +1,8 @@
+def combined_loss(y_true, y_pred):
+    # Define the SSIM and MSE components
+    alpha   = (1/5)
+    ssim    = 1 - tf.reduce_mean(tf.image.ssim(y_true, y_pred, max_val=1.0), axis=0)
+    mse_obj = tf.keras.losses.MeanSquaredError()
+    mse     = mse_obj(y_true, y_pred)
+    # Compute the combined loss
+    return alpha*ssim + (1-alpha)*mse
