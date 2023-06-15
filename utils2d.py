@@ -1,12 +1,11 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.io import loadmat
 
 import glob, os
-from time import time                   
+from time import time 
 import pyvista as pv
-from scipy.io import savemat
+from scipy.io import loadmat, savemat
 from skimage.transform import resize, rescale, downscale_local_mean
 from sklearn.preprocessing import MinMaxScaler
  

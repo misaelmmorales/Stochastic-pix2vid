@@ -11,7 +11,7 @@ dims = 128;
 
 %% Make Grid
 nx=dims;       ny=dims;       nz=1; 
-dx=1000*meter; dy=1000*meter; dz=50*meter; 
+dx=1200*meter; dy=1200*meter; dz=100*meter; 
 
 % Make cartesian grid
 G = cartGrid([nx ny nz], [dx dy dz]);
@@ -21,7 +21,9 @@ G = computeGeometry(G);
 gravity on;  g = gravity;
 rhow = 1000; % density of brine corresponding to 94 degrees C and 300 bar
 %initState.pressure = rhow * g(3) * G.cells.centroids(:,3);
-initState.pressure = G.cells.centroids(:,3) * 240 * psia;
+%initState.pressure = G.cells.centroids(:,3) * 240 * psia;
+P0 = 4000*psia;
+initState.pressure = repmat(P0, 128*128, 1);
 initState.s = repmat([1, 0], G.cells.num, 1);
 initState.sGmax = initState.s(:,2);
 
@@ -69,16 +71,17 @@ bc = addBC(bc, bc_face_ix, 'pressure', p_face_pressure, 'sat', [1,0]);
 timestep1  = rampupTimesteps(10*year, year/2, 12);
 timestep2  = rampupTimesteps(90*year, 5*year, 0);
 total_time = [timestep1; timestep2];
-%total_time = timestep1;
+%total_time = timestep1
+inj_time = 10*year;
 
 %% Generate Models & Run Simulation
 N = 1000;
 M = size(total_time,1);
 
-parfor i=1:5
-    well_loc                 = randi([10,118], 1,2);
+parfor i=1:2
+    well_loc                 = randi([30,98], 1,2);
     rock                     = gen_rock(i)
-    W                        = gen_wells(G, rock, well_loc)
+    W                        = gen_wells(G, rock, well_loc, inj_time)
     [schedule, dT1, dT2]     = gen_schedule(W, bc, timestep1, timestep2)
     %[schedule, dT1]          = gen_schedule(W, bc, timestep1)
     [model, wellSol, states] = gen_simulation(G, rock, fluid, initState, schedule)
@@ -88,7 +91,7 @@ parfor i=1:5
     fprintf('Simulation %i done\n', i)
 end
 %%
-for i=1:5
+for i=1:2
     figure; plotToolbar(G, result{i}); colormap jet; colorbar; view(-70,80)
 end
 
