@@ -6,7 +6,7 @@ facies_name = sprintf('facies/facies%d.mat', realization);
 poro_name = sprintf('porosity/porosity%d.mat', realization);
 perm_name = sprintf('permeability/logperm%d.mat', realization);
 
-facies_dat = load(fullfile(pwd(), facies_name)).facies';
+facies_dat = load(fullfile(pwd(), facies_name)).facies'+0.5;
 poro_dat   = load(fullfile(pwd(), poro_name)).poro;
 perm_dat   = 10.^load(fullfile(pwd(), perm_name)).logperm;
 

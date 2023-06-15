@@ -78,7 +78,7 @@ inj_time = 10*year;
 N = 1000;
 M = size(total_time,1);
 
-parfor i=1:2
+parfor i=1:3
     well_loc                 = randi([30,98], 1,2);
     rock                     = gen_rock(i)
     W                        = gen_wells(G, rock, well_loc, inj_time)
@@ -91,7 +91,7 @@ parfor i=1:2
     fprintf('Simulation %i done\n', i)
 end
 %%
-for i=1:2
+for i=1:3
     figure; plotToolbar(G, result{i}); colormap jet; colorbar; view(-70,80)
 end
 
