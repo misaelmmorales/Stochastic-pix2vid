@@ -4,7 +4,7 @@ set(0,'DefaultFigureWindowStyle','docked')
 
 % Import MRST module
 mrstModule add SPE10 co2lab
-mrstModule add ad-core ad-props ad-blackoil
+mrstModule add ad-core ad-props ad-blackoil mrst-gui
 
 % Define global variables
 dims = 128;
@@ -75,7 +75,7 @@ total_time = [timestep1; timestep2];
 N = 1000;
 M = size(total_time,1); %number of schedule timesteps (75)
 
-parfor i=1:4
+parfor i=1:2
     fprintf('Simulation %i\n', i)
     rock                     = gen_rock(i)
     W                        = gen_wells(G, rock)

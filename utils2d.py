@@ -22,9 +22,9 @@ from keras.layers import BatchNormalization, LeakyReLU
 from keras.layers import Flatten, Reshape, RepeatVector
 from keras.layers import Conv2D, MaxPooling2D, Conv3D, Conv3DTranspose, GRU
 
-dim      = 60    #size of images (60x60)
-N_real   = 255   #number of realizations
-N_states = 60    #number of states
+dim      = 128    #size of images (128x128)
+N_real   = 1000   #number of realizations
+N_states = 75     #number of states
 
 def check_tensorflow_gpu():
     sys_info = tf.sysconfig.get_build_info()

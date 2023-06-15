@@ -4,7 +4,7 @@ function [W] = gen_wells(G, rock)
 
 I_inj = 64;
 J_inj = 64;
-R_inj = 1e3 * meter^3 / day;
+R_inj = 1.5e4 * meter^3 / day;
 
 W = [];
 W = verticalWell(W, G, rock, I_inj, J_inj, [],...
