@@ -21,7 +21,7 @@ G = computeGeometry(G);
 gravity on;  g = gravity;
 rhow = 1000; % density of brine corresponding to 94 degrees C and 300 bar
 %initState.pressure = rhow * g(3) * G.cells.centroids(:,3);
-initState.pressure = G.cells.centroids(:,3) * 3000 * psia;
+initState.pressure = G.cells.centroids(:,3) * 240 * psia;
 initState.s = repmat([1, 0], G.cells.num, 1);
 initState.sGmax = initState.s(:,2);
 
@@ -66,26 +66,34 @@ p_face_pressure = initState.pressure(bc_cell_ix);
 bc = addBC(bc, bc_face_ix, 'pressure', p_face_pressure, 'sat', [1,0]);
 
 %% Define Timesteps
-timestep1  = rampupTimesteps(5*year, year/6, 0);
-timestep2  = rampupTimesteps(45*year, year, 0);
+timestep1  = rampupTimesteps(10*year, year/2, 12);
+timestep2  = rampupTimesteps(90*year, 5*year, 0);
 total_time = [timestep1; timestep2];
 %total_time = timestep1;
 
 %% Generate Models & Run Simulation
 N = 1000;
-M = size(total_time,1); %number of schedule timesteps (75)
+M = size(total_time,1);
 
-parfor i=1:2
-    fprintf('Simulation %i\n', i)
+parfor i=1:5
+    well_loc                 = randi([10,118], 1,2);
     rock                     = gen_rock(i)
-    W                        = gen_wells(G, rock)
+    W                        = gen_wells(G, rock, well_loc)
     [schedule, dT1, dT2]     = gen_schedule(W, bc, timestep1, timestep2)
     %[schedule, dT1]          = gen_schedule(W, bc, timestep1)
     [model, wellSol, states] = gen_simulation(G, rock, fluid, initState, schedule)
 
-
     result{i} = states;
+
+    fprintf('Simulation %i done\n', i)
 end
+%%
+for i=1:5
+    figure; plotToolbar(G, result{i}); colormap jet; colorbar; view(-70,80)
+end
+
+
+
 
 %% Collect and Export Results
 for i=1:N

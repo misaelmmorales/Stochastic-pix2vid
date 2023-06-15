@@ -1,10 +1,9 @@
-function [W] = gen_wells(G, rock)
+function [W] = gen_wells(G, rock, well_loc)
 %GEN_WELLS Summary of this function goes here
 %   Detailed explanation goes here
-
-I_inj = 64;
-J_inj = 64;
-R_inj = 1.5e4 * meter^3 / day;
+I_inj = well_loc(1);
+J_inj = well_loc(2);
+R_inj = 500 * stb/day;
 
 W = [];
 W = verticalWell(W, G, rock, I_inj, J_inj, [],...
