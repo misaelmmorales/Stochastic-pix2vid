@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import glob, os
+import glob, os, cv2
 from time import time 
 import pyvista as pv
 from scipy.io import loadmat, savemat
