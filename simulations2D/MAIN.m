@@ -78,15 +78,17 @@ inj_time = 10*year;
 N = 1000;
 M = size(total_time,1);
 
-parfor i=1:3
-    well_loc                 = randi([30,98], 1,2);
-    rock                     = gen_rock(i)
-    W                        = gen_wells(G, rock, well_loc, inj_time)
-    [schedule, dT1, dT2]     = gen_schedule(W, bc, timestep1, timestep2)
-    %[schedule, dT1]          = gen_schedule(W, bc, timestep1)
-    [model, wellSol, states] = gen_simulation(G, rock, fluid, initState, schedule)
+parfor i=1:4
+    nwells                   = randi([1,3], 1);
+    well_loc                 = randi([32,96], nwells, 2);
+    rock                     = gen_rock(i);
+    W                        = gen_wells(G, rock, well_loc, inj_time);
+    [schedule, dT1, dT2]     = gen_schedule(W, bc, timestep1, timestep2);
+    %[schedule, dT1]          = gen_schedule(W, bc, timestep1);
+    [model, wellSol, states] = gen_simulation(G, rock, fluid, initState, schedule);
 
     result{i} = states;
+    well_locations{i} = well_loc;
 
     fprintf('Simulation %i done\n', i)
 end

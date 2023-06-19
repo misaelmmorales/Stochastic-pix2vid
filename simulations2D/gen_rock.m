@@ -3,22 +3,19 @@ function [rock] = gen_rock(realization)
 %   Detailed explanation goes here
 
 facies_name = sprintf('facies/facies%d.mat', realization);
-poro_name = sprintf('porosity/porosity%d.mat', realization);
+poro_name = sprintf('porosity/poro%d.mat', realization);
 perm_name = sprintf('permeability/logperm%d.mat', realization);
 
-facies_dat = load(fullfile(pwd(), facies_name)).facies'+0.66;
+facies_dat = load(fullfile(pwd(), facies_name)).facies;
 poro_dat   = load(fullfile(pwd(), poro_name)).poro;
-perm_dat   = 10.^load(fullfile(pwd(), perm_name)).logperm *milli*darcy;
+perm_dat   = load(fullfile(pwd(), perm_name)).logperm;
 
 poro_sample = facies_dat .* poro_dat;
-perm_sample = (10.^(facies_dat .* log10(convertTo(perm_dat,milli*darcy))))*milli*darcy;
+perm_sample = facies_dat .* perm_dat;
+perm_fin   = 10.^perm_sample*milli*darcy;
 
-perm(:,1) = perm_sample;
-perm(:,2) = perm_sample;
-perm(:,3) = 0.1*perm_sample;
-
-rock.poro = poro_sample;
-rock.perm = perm;
+rock.poro = poro_sample';
+rock.perm = perm_fin';
 
 end
 
