@@ -72,16 +72,17 @@ timestep1  = rampupTimesteps(10*year, year/2, 12);
 timestep2  = rampupTimesteps(90*year, 5*year, 0);
 total_time = [timestep1; timestep2];
 %total_time = timestep1
-inj_time = 10*year;
+inj_time = sum(timestep1)/year;
 
 %% Generate Models & Run Simulation
 N = 1000;
 M = size(total_time,1);
 
-parfor i=1:4
+parfor i=1:N
+    k=i-1;
     nwells                   = randi([1,3], 1);
     well_loc                 = randi([32,96], nwells, 2);
-    rock                     = gen_rock(i);
+    rock                     = gen_rock(k);
     W                        = gen_wells(G, rock, well_loc, inj_time);
     [schedule, dT1, dT2]     = gen_schedule(W, bc, timestep1, timestep2);
     %[schedule, dT1]          = gen_schedule(W, bc, timestep1);
