@@ -1,6 +1,12 @@
 %% Main variables
 clear;clc;close all
-set(0,'DefaultFigureWindowStyle','docked')
+%set(0,'DefaultFigureWindowStyle','docked')
+
+proj_dir = 'C:/Users/381792/Documents/CNN-RNN-CO2/simulations2D';
+mdir = 'C:/Users/381792/Documents/mrst-2023a';
+chdir(mdir);
+startup;
+chdir(proj_dir);
 
 % Import MRST module
 mrstModule add SPE10 co2lab
@@ -10,8 +16,8 @@ mrstModule add ad-core ad-props ad-blackoil mrst-gui
 dims = 128;
 
 %% Make Grid
-nx=dims;       ny=dims;       nz=1; 
-dx=1200*meter; dy=1200*meter; dz=100*meter; 
+nx=dims;       ny=dims;       nz=1;
+dx=1200*meter; dy=1200*meter; dz=100*meter;
 
 % Make cartesian grid
 G = cartGrid([nx ny nz], [dx dy dz]);
@@ -56,7 +62,7 @@ fluid.krG = @(s) fluid.krG(max((s-src)./(1-src), 0));
 % Add capillary pressure
 pe = 5 * kilo * Pascal;
 pcWG = @(sw) pe * sw.^(-1/2);
-fluid.pcWG = @(sg) pcWG(max((1-sg-srw)./(1-srw), 1e-5)); 
+fluid.pcWG = @(sg) pcWG(max((1-sg-srw)./(1-srw), 1e-5));
 
 %% Make Boundary Conditions
 bc = [];
@@ -88,45 +94,10 @@ parfor i=1:N
     %[schedule, dT1]          = gen_schedule(W, bc, timestep1);
     [model, wellSol, states] = gen_simulation(G, rock, fluid, initState, schedule);
 
-    result{i} = states;
-    well_locations{i} = well_loc;
+    rname = sprintf('states/states%d.mat', k); save(rname, 'states', '-v7');
+    wname = sprintf('wells/wells%d.mat', k);   save(wname, 'well_loc', '-v7');
 
     fprintf('Simulation %i done\n', i)
 end
-%%
-for i=1:3
-    figure; plotToolbar(G, result{i}); colormap jet; colorbar; view(-70,80)
-end
-
-
-
-
-%% Collect and Export Results
-for i=1:N
-    for j=1:M
-        sol(i,j)          = result{1,i}{j,1};  %define results cell as struct
-        pressure(i,:,j)   = sol(i,j).pressure; %collect pressure states
-        saturation(i,:,j) = sol(i,j).s(:,2);   %collect saturation states
-    end
-end
-
-for i=1:N
-    poro(i,:) = all_poro(:,i);
-    perm(i,:) = all_perm_md(:,1,i);
-end
-
-save pressure pressure
-save saturation saturation
-save poro poro
-save perm perm
-
-%% Make Plots
-% figure
-% for i=1:9
-%     subplot(3,3,i)
-%     plotCellData(G, states{i*10}.s(:,2))
-%     time = convertTo(cumsum(total_time), year);
-%     axis tight; title([num2str(time(i*10)), ' years'])
-%     view(25,65);
 
 %% END
