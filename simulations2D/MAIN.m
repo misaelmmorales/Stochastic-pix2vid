@@ -1,5 +1,8 @@
-%% Main variables
 clear;clc;close all
+<<<<<<< HEAD
+%% Main variables
+set(0,'DefaultFigureWindowStyle','docked')
+=======
 %set(0,'DefaultFigureWindowStyle','docked')
 
 proj_dir = 'C:/Users/381792/Documents/CNN-RNN-CO2/simulations2D';
@@ -7,9 +10,10 @@ mdir = 'C:/Users/381792/Documents/mrst-2023a';
 chdir(mdir);
 startup;
 chdir(proj_dir);
+>>>>>>> 7906796cce57cd2584b3887c71c8e445750f702a
 
 % Import MRST module
-mrstModule add SPE10 co2lab
+mrstModule add spe10 co2lab
 mrstModule add ad-core ad-props ad-blackoil mrst-gui
 
 % Define global variables
@@ -91,13 +95,21 @@ parfor i=1:N
     rock                     = gen_rock(k);
     W                        = gen_wells(G, rock, well_loc, inj_time);
     [schedule, dT1, dT2]     = gen_schedule(W, bc, timestep1, timestep2);
-    %[schedule, dT1]          = gen_schedule(W, bc, timestep1);
     [model, wellSol, states] = gen_simulation(G, rock, fluid, initState, schedule);
 
+<<<<<<< HEAD
+    wname = sprintf('wells/wells%d', k);   parsave(wname, well_loc)
+    rname = sprintf('states/states%d', k); parsave(rname, states)
+=======
     rname = sprintf('states/states%d.mat', k); save(rname, 'states', '-v7');
     wname = sprintf('wells/wells%d.mat', k);   save(wname, 'well_loc', '-v7');
+>>>>>>> 7906796cce57cd2584b3887c71c8e445750f702a
 
     fprintf('Simulation %i done\n', i)
 end
 
+<<<<<<< HEAD
 %% END
+=======
+%% END
+>>>>>>> 7906796cce57cd2584b3887c71c8e445750f702a
