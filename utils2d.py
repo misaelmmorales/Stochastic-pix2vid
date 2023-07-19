@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import glob, os, cv2
+import sys, os, glob,cv2
 from time import time 
 import pyvista as pv
 from scipy.io import loadmat, savemat
@@ -21,6 +21,15 @@ from keras.layers import BatchNormalization, LeakyReLU
 from keras.layers import Flatten, Reshape, RepeatVector
 from keras.layers import Conv2D, MaxPooling2D, Conv3D, Conv3DTranspose, GRU
 
+import torch
+import torch.nn as nn
+from torch.nn import Sequential
+from torch.nn import Linear, ReLU, LeakyReLU, Dropout, BatchNorm1d
+from torch.nn import Conv2d, ConvTranspose2d, MaxPool2d, BatchNorm2d
+from torch.optim import NAdam, Adam
+from torch.utils.data import Dataset, TensorDataset, DataLoader
+import torch.nn.functional as F
+
 dim      = 128    #size of images (128x128)
 N_real   = 1000   #number of realizations
 N_states = 50     #number of states
@@ -33,6 +42,22 @@ def check_tensorflow_gpu():
     print('# GPU available:', len(tf.config.experimental.list_physical_devices('GPU')))
     print("CUDA: {} | cuDNN: {}".format(sys_info["cuda_version"], sys_info["cudnn_version"]))
     print(tf.config.list_physical_devices())
+    return None
+
+def check_torch_gpu():
+    '''
+    Check torch build in python to ensure GPU is available for training.
+    '''
+    torch_version, cuda_avail = torch.__version__, torch.cuda.is_available()
+    count, name = torch.cuda.device_count(), torch.cuda.get_device_name()
+    py_version, conda_env_name = sys.version, sys.executable.split('\\')[-2]
+    print('-------------------------------------------------')
+    print('------------------ VERSION INFO -----------------')
+    print('Conda Environment: {} | Python version: {}'.format(conda_env_name, py_version))
+    print('Torch version: {}'.format(torch_version))
+    print('Torch build with CUDA? {}'.format(cuda_avail))
+    print('# Device(s) available: {}, Name(s): {}\n'.format(count, name))
+    device = torch.device('cuda' if cuda_avail else 'cpu')
     return None
 
 def load_process_data():
@@ -151,3 +176,96 @@ def compare_results_plot(X_test, y_true, y_pred, nrows=4, row_mult=40, figsize=(
         axs[i,len(month_states)].imshow(X_test[i*row_mult,:,:], cmap='jet')
         axs[i,len(month_states)].set(yticklabels=[], xticklabels=[], yticks=[])
         axs[0,len(month_states)].set_title('Log Perm')
+
+############################################################################################
+global_reg = 1e-4
+
+# Convolutional block (Encoder)
+class ConvBlock(nn.Module):
+    def __init__(self, filt, in_channels, kern=(3, 3), reg=global_reg):
+        super(ConvBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, filt, kernel_size=kern, padding=1)
+        self.conv2 = nn.Conv2d(filt, filt, kernel_size=kern, padding=1)
+        self.batchnorm = nn.BatchNorm2d(filt)
+        self.activation = nn.LeakyReLU(0.3)
+        self.pool = nn.MaxPool2d(2)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.batchnorm(x)
+        x = self.activation(x)
+        x = self.pool(x)
+        return x
+
+# Recurrent block
+class RNNBlock(nn.Module):
+    def __init__(self, units, in_features, drop=0.2):
+        super(RNNBlock, self).__init__()
+        self.flatten = nn.Flatten()
+        self.repeat = nn.ReplicationPad1d(1)  # Pad for kernel_size (3, 3) in Conv3DTranspose
+        self.gru = nn.GRU(in_features, units, batch_first=True, dropout=drop)
+
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.repeat(x)
+        x, _ = self.gru(x)
+        x = x.view(-1, 5, 5, 5, x.shape[-1])
+        return x
+
+# Transpose Convolutional block (Decoder)
+class ConvTBlock(nn.Module):
+    def __init__(self, filt, stride, in_channels, kern=(3, 3, 3), reg=global_reg):
+        super(ConvTBlock, self).__init__()
+        self.conv1 = nn.ConvTranspose3d(in_channels, filt, kernel_size=kern, padding=1, stride=1)
+        self.conv2 = nn.ConvTranspose3d(filt, filt, kernel_size=kern, padding=1, stride=stride)
+        self.batchnorm = nn.BatchNorm3d(filt)
+        self.activation = nn.LeakyReLU(0.3)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.batchnorm(x)
+        x = self.activation(x)
+        return x
+
+# Output block
+class OutputBlock(nn.Module):
+    def __init__(self, filt, in_channels, kern=(3, 3, 3)):
+        super(OutputBlock, self).__init__()
+        self.conv1 = nn.ConvTranspose3d(in_channels, filt[0], kernel_size=kern, padding=1)
+        self.conv2 = nn.Conv3d(filt[0], filt[1], kernel_size=kern, padding=1)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        return x
+
+# Define CNN-RNN forward proxy model
+class ProxyModel(nn.Module):
+    def __init__(self, dim):
+        super(ProxyModel, self).__init__()
+        self.dim = dim
+        self.encoder = nn.Sequential(
+            ConvBlock(filt=8, in_channels=1),
+            ConvBlock(filt=16, in_channels=8),
+            ConvBlock(filt=32, in_channels=16),
+            ConvBlock(filt=64, in_channels=32)
+        )
+        self.rnn_block = RNNBlock(units=128, in_features=64*5*5)
+        self.decoder = nn.Sequential(
+            ConvTBlock(filt=64, stride=2, in_channels=128),
+            ConvTBlock(filt=32, stride=2, in_channels=64),
+            ConvTBlock(filt=16, stride=3, in_channels=32)
+        )
+        self.output_block = OutputBlock(filt=[8, 1], in_channels=16)
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.rnn_block(x)
+        x = self.decoder(x)
+        x = self.output_block(x)
+        return x
+
+def make_proxy(dim):
+    return ProxyModel(dim)
