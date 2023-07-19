@@ -1,0 +1,7 @@
+Normalized Hard Data
+4
+X
+Y
+Z
+NormHardData
+63  63  1  1.5021

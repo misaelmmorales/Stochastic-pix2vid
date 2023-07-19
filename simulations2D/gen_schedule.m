@@ -15,6 +15,8 @@ end
 schedule.step.val = [dT1; dT2];
 schedule.step.control = [ones(numel(dT1),1) ; ones(numel(dT2),1)*2];
 
+
+
 %{
 % Control Schedule (injection period only)
 schedule.control = struct('W', W, 'bc', bc);
