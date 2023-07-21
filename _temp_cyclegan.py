@@ -26,6 +26,23 @@ from torchsummary import summary
 from torchviz import make_dot
 import torchio as tio
 
+####################################################################################
+# Initialize CycleGAN
+cycle_gan = CycleGAN(input_channels_X, output_channels_Y, input_channels_Y, output_channels_X).to(device)
+
+# Optimizers
+optimizer_G   = optim.Adam(cycle_gan.parameters(), lr=lr)
+optimizer_D_X = optim.Adam(cycle_gan.discriminator_X.parameters(), lr=lr)
+optimizer_D_Y = optim.Adam(cycle_gan.discriminator_Y.parameters(), lr=lr)
+optimizers = [optimizer_G, optimizer_D_X, optimizer_D_Y]
+
+# Loss functions
+adversarial_loss       = nn.MSELoss()
+cycle_consistency_loss = nn.L1Loss()
+losses = [cycle_consistency_loss, adversarial_loss]
+
+fake_imgs, loss = cycle_gan.train(dataloader, num_epochs, optimizers, losses, save=True)
+####################################################################################
 
 def check_torch_gpu(self):
     '''
