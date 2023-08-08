@@ -30,9 +30,9 @@ from torch.optim import NAdam, Adam
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 import torch.nn.functional as F
 
-dim      = 128    #size of images (128x128)
-N_real   = 1000   #number of realizations
-N_states = 50     #number of states
+dim      = 60    #size of images (128x128)
+N_real   = 150   #number of realizations
+N_states = 60     #number of states
 
 def check_tensorflow_gpu():
     sys_info = tf.sysconfig.get_build_info()
@@ -45,9 +45,6 @@ def check_tensorflow_gpu():
     return None
 
 def check_torch_gpu():
-    '''
-    Check torch build in python to ensure GPU is available for training.
-    '''
     torch_version, cuda_avail = torch.__version__, torch.cuda.is_available()
     count, name = torch.cuda.device_count(), torch.cuda.get_device_name()
     py_version, conda_env_name = sys.version, sys.executable.split('\\')[-2]
@@ -60,12 +57,12 @@ def check_torch_gpu():
     device = torch.device('cuda' if cuda_avail else 'cpu')
     return None
 
-def load_process_data():
+def load_process_data(repo):
     # Load data from high-fidelity simulations
-    poro_df       = loadmat('simulations/poro')['poro']              #porosity [frac]
-    perm_df       = loadmat('simulations/perm')['perm']              #permeability[mD]
-    saturation_df = loadmat('simulations/saturation')['saturation']  #saturation[frac]
-    pressure_df   = loadmat('simulations/pressure')['pressure']      #pressure[Pascal]
+    poro_df       = loadmat(repo+'/poro')['poro']          #porosity [frac]
+    perm_df       = loadmat(repo+'/perm')['perm']              #permeability[mD]
+    saturation_df = loadmat(repo+'/saturation')['saturation']  #saturation[frac]
+    pressure_df   = loadmat(repo+'/pressure')['pressure']      #pressure[Pascal]
     poro       = np.reshape(poro_df, [N_real,dim,dim])                  #porosity maps
     perm       = np.log10(np.reshape(perm_df, [N_real,dim,dim]))        #log10(perm) maps
     saturation = np.reshape(saturation_df, [N_real,dim,dim,N_states])   #saturation maps & states
