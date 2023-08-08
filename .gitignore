@@ -9,3 +9,10 @@ simulations2D/perm2d.csv
 >>>>>>> 7906796cce57cd2584b3887c71c8e445750f702a
 >>>>>>> Stashed changes
 *.mat
+simulations2D/data/facies.npy
+simulations2D/data/perm.npy
+simulations2D/data/poro.npy
+simulations2D/data/pressure.npy
+simulations2D/data/saturation.npy
+simulations2D/data/timestamps.npy
+simulations2D/data/wells.npy
