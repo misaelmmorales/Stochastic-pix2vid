@@ -3,8 +3,8 @@ clear;clc;close all
 set(0,'DefaultFigureWindowStyle','docked')
 %set(0,'DefaultFigureWindowStyle','docked')
 
-proj_dir = 'C:/Users/381792/Documents/CNN-RNN-CO2/simulations2D';
-mdir = 'C:/Users/381792/Documents/mrst-2023a';
+proj_dir = 'E:/CNN-RNN-CO2/simulations2D';
+mdir = 'C:/Users/Misael Morales/OneDrive - The University of Texas at Austin/Documents/MATLAB/mrst-2021b';
 chdir(mdir);
 startup;
 chdir(proj_dir);
@@ -14,11 +14,11 @@ mrstModule add spe10 co2lab
 mrstModule add ad-core ad-props ad-blackoil mrst-gui
 
 % Define global variables
-dims = 128;
+dims = 64;
 
 %% Make Grid
 nx=dims;       ny=dims;       nz=1;
-dx=1200*meter; dy=1200*meter; dz=100*meter;
+dx=1000*meter; dy=1000*meter; dz=100*meter;
 
 % Make cartesian grid
 G = cartGrid([nx ny nz], [dx dy dz]);
@@ -30,7 +30,7 @@ rhow = 1000; % density of brine corresponding to 94 degrees C and 300 bar
 %initState.pressure = rhow * g(3) * G.cells.centroids(:,3);
 %initState.pressure = G.cells.centroids(:,3) * 240 * psia;
 P0 = 4000*psia;
-initState.pressure = repmat(P0, 128*128, 1);
+initState.pressure = repmat(P0, dims*dims, 1);
 initState.s = repmat([1, 0], G.cells.num, 1);
 initState.sGmax = initState.s(:,2);
 
@@ -75,30 +75,36 @@ p_face_pressure = initState.pressure(bc_cell_ix);
 bc = addBC(bc, bc_face_ix, 'pressure', p_face_pressure, 'sat', [1,0]);
 
 %% Define Timesteps
+%{
 timestep1  = rampupTimesteps(10*year, year/2, 12);
 timestep2  = rampupTimesteps(90*year, 5*year, 0);
 total_time = [timestep1; timestep2];
 %total_time = timestep1
 inj_time = sum(timestep1)/year;
+%}
+
+timestep1 = rampupTimesteps(5*year, year/12, 0);
+total_time = timestep1;
+
 
 %% Generate Models & Run Simulation
 N = 1000;
 M = size(total_time,1);
 
+perm = load('perm_64x64.mat').perm';
+poro = load('poro_64x64.mat').poro';
+facies = load('facies_64x64.mat').facies';
+
 parfor i=1:N
-    k=i-1;
     nwells                   = randi([1,3], 1);
-    well_loc                 = randi([32,96], nwells, 2);
-    rock                     = gen_rock(k);
-    W                        = gen_wells(G, rock, well_loc, inj_time);
-    [schedule, dT1, dT2]     = gen_schedule(W, bc, timestep1, timestep2);
+    well_loc                 = randi([16,48], nwells, 2);
+    rock                     = gen_rock(i, perm, poro, facies);
+    W                        = gen_wells(G, rock, well_loc);
+    [schedule, dT1]          = gen_schedule(W, bc, timestep1);
     [model, wellSol, states] = gen_simulation(G, rock, fluid, initState, schedule);
 
-    wname = sprintf('wells/wells%d', k);   parsave(wname, well_loc)
-    rname = sprintf('states/states%d', k); parsave(rname, states)
-    rname = sprintf('states/states%d.mat', k); save(rname, 'states', '-v7');
-    wname = sprintf('wells/wells%d.mat', k);   save(wname, 'well_loc', '-v7');
-
+    wname = sprintf('wells/wells%d', i);   parsave(wname, well_loc)
+    rname = sprintf('states/states%d', i); parsave(rname, states)
     fprintf('Simulation %i done\n', i)
 end
 

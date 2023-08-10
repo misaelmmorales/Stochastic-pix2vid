@@ -1,4 +1,4 @@
-function [W] = gen_wells(G, rock, well_loc, ~)
+function [W] = gen_wells(G, rock, well_loc)
 %GEN_WELLS Summary of this function goes here
 %   Detailed explanation goes here
 
