@@ -8,14 +8,13 @@ from scipy.io import loadmat, savemat
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from skimage.metrics import mean_squared_error as img_mse
-from skimage.metrics import structural_similarity
+from skimage.metrics import structural_similarity as img_ssim
 
 import tensorflow as tf
 import keras.backend as K
 from keras import Model, regularizers
 from keras.layers import *
-from keras.optimizers import Adam
-from keras.losses import mean_squared_error as loss_mse
+from keras.optimizers import Adam, Nadam
 from tensorflow_addons.layers import InstanceNormalization, GELU
 from tensorflow.keras.callbacks import LearningRateScheduler
 from tensorflow.image import ssim
@@ -40,9 +39,9 @@ class SpatiotemporalCO2:
         self.timesteps  = 60
         self.dim        = 64
         self.test_size  = 0.25
-        self.optimizer  = tf.keras.optimizers.Nadam(learning_rate=1e-3)
+        self.optimizer  = Nadam(learning_rate=1e-3)
         self.loss_alpha = 0.5
-        self.epochs     = 100
+        self.num_epochs = 100
         self.batch_size = 30
         self.monitor_cb = 10
         self.lr_cb      = 20
@@ -149,7 +148,7 @@ class SpatiotemporalCO2:
         start = time()
         self.fit = self.model.fit(self.X_train, self.y_train,
                                     shuffle          = True,
-                                    epochs           = self.epochs,
+                                    epochs           = self.num_epochs,
                                     validation_split = 0.20,
                                     batch_size       = self.batch_size,
                                     callbacks        = [loss_callback, lr_schedule],
