@@ -45,6 +45,7 @@ class SpatiotemporalCO2:
         self.epochs     = 100
         self.batch_size = 30
         self.monitor_cb = 10
+        self.lr_cb      = 20
 
     def load_data(self):
         X_data = np.zeros((self.n_realizations, self.x_channels, self.dim, self.dim))
@@ -92,7 +93,7 @@ class SpatiotemporalCO2:
                 print('Epoch: {} - Loss: {:.4f} - Val Loss: {:.4f}'.format(epoch, logs['loss'], logs['val_loss']))
 
     def lr_scheduler(self, epoch, lr):
-        if epoch % self.monitor_cb == 0:
+        if epoch % self.lr_cb == 0:
             new_lr = lr * 0.5
             return new_lr
         return lr
