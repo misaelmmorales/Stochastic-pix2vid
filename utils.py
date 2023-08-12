@@ -99,10 +99,18 @@ class SpatiotemporalCO2:
             if epoch % self.monitor_cb == 0:
                 print('Epoch: {} - Loss: {:.4f} - Val Loss: {:.4f}'.format(epoch, logs['loss'], logs['val_loss']))
 
-    def lr_scheduler(self, epoch, lr):
-        if epoch % self.lr_decay == 0:
-            new_lr = lr * 0.5
-            return new_lr
+    def lr_scheduler(self, epoch, lr, type=1):
+        if type == 1:
+            if epoch % self.lr_decay == 0:
+                new_lr = lr * 0.5
+                return new_lr
+        elif type == 2:
+            if epoch < 10:
+                return lr
+            else:
+                return lr * tf.math.exp(-0.1)
+        else:
+            print('Select Type [1: halve every 10 epochs, 2: -0.1 exponential decay after 10 epochs]')
         return lr
 
     def encoder_layer(self, inp, filt, kern=(3,3), pool=(2,2), pad='same', leaky_slope=0.1):
