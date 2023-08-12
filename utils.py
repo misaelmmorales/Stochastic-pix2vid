@@ -37,19 +37,21 @@ class SpatiotemporalCO2:
     def __init__(self):
         self.input_features_dir = 'simulations2D/input_features'
         self.output_targets_dir = 'simulations2D/output_targets'
+
         self.n_realizations = 1000
         self.x_channels = 4
         self.y_channels = 2
         self.timesteps  = 60
         self.dim        = 64
         self.test_size  = 0.25
+
         self.optimizer  = Nadam(learning_rate=1e-3)
         self.criterion  = self.custom_loss
-        self.l2_alpha   = 0.8
+        self.l2_alpha   = 0.9
+
         self.num_epochs = 100
-        self.batch_size = 20
-        self.monitor_cb = 10
-        self.lr_decay   = 20
+        self.batch_size = 30
+        self.lr_decay   = 10
         self.verbose    = 0
 
     def load_data(self):
@@ -72,6 +74,7 @@ class SpatiotemporalCO2:
         self.y_norm = y_scaled.reshape(num, tsteps, height, width, channels)
         print('normalized - X: {} | y: {}'.format(self.X_norm.shape, self.y_norm.shape)) 
         if subsample != None:
+            print('Subsampling data for {} samples ...'.format(subsample))
             idx = np.random.choice(range(self.n_realizations), subsample, replace=False)
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm[idx], self.y_norm[idx], test_size=self.test_size)
         else:
@@ -96,36 +99,44 @@ class SpatiotemporalCO2:
 
     class LossCallback(tf.keras.callbacks.Callback):
         def on_epoch_end(self, epoch, logs=None):
-            if epoch % self.monitor_cb == 0:
-                print('Epoch: {} - Loss: {:.4f} - Val Loss: {:.4f}'.format(epoch, logs['loss'], logs['val_loss']))
+            if (epoch+1) % 10 == 0:
+                print('Epoch: {} - Loss: {:.4f} - Val Loss: {:.4f}'.format(epoch+1, logs['loss'], logs['val_loss']))
 
-    def lr_scheduler(self, epoch, lr, type=1):
-        if type == 1:
+    def lr_scheduler(self, epoch, lr, schedule_type=1):
+        if schedule_type == 1:
             if epoch % self.lr_decay == 0:
                 new_lr = lr * 0.5
                 return new_lr
-        elif type == 2:
-            if epoch < 10:
+        elif schedule_type == 2:
+            if epoch < self.lr_decay:
                 return lr
             else:
                 return lr * tf.math.exp(-0.1)
         else:
-            print('Select Type [1: halve every 10 epochs, 2: -0.1 exponential decay after 10 epochs]')
+            print('Select Type [1: halve every n epochs, 2: -0.1 exponential decay after n epochs]')
         return lr
 
     def encoder_layer(self, inp, filt, kern=(3,3), pool=(2,2), pad='same', leaky_slope=0.1):
-        x = SeparableConv2D(filters=filt, kernel_size=kern, padding=pad)(inp)
+        #x = SeparableConv2D(filters=filt, kernel_size=kern, padding=pad)(inp)
         #x = SeparableConv2D(filters=filt, kernel_size=kern, padding=pad)(x)
-        x = InstanceNormalization()(x)
+        #x = InstanceNormalization()(x)
+        #x = GELU()(x)
+        #x = AveragePooling2D(pool)(x)
+        x = Conv2D(filters=filt, kernel_size=kern, padding=pad)(inp)
+        x = BatchNormalization()(x)
         x = LeakyReLU(leaky_slope)(x)
         x = MaxPooling2D(pool)(x)
         return x
 
     def decoder_layer(self, inp, filt, kern=(3,3), pad='same', drop=0.1, leaky_slope=0.1):
-        x = ConvLSTM2D(filters=filt, kernel_size=kern, padding=pad, return_sequences=True, dropout=drop)(inp)
+        #x = ConvLSTM2D(filters=filt, kernel_size=kern, padding=pad, return_sequences=True, dropout=drop)(inp)
         #x = TimeDistributed(SeparableConv2D(filters=filt, kernel_size=kern, padding=pad))(x)
-        x = TimeDistributed(Conv2DTranspose(filters=filt, kernel_size=kern, padding=pad, strides=2))(x)
-        x = InstanceNormalization()(x)
+        #x = TimeDistributed(Conv2DTranspose(filters=filt, kernel_size=kern, padding=pad, strides=2))(x)
+        #x = InstanceNormalization()(x)
+        #x = GELU()(x)
+        x = TimeDistributed(UpSampling2D())(inp)
+        x = ConvLSTM2D(filters=filt, kernel_size=kern, padding=pad, return_sequences=True, dropout=drop)(x)
+        x = BatchNormalization()(x)
         x = LeakyReLU(leaky_slope)(x)
         return x
        
@@ -151,15 +162,25 @@ class SpatiotemporalCO2:
 
     def train(self, model):
         model.compile(optimizer=self.optimizer, loss=self.criterion, metrics=['mse'])
-        #loss_callback = self.LossCallback()
-        #lr_schedule = LearningRateScheduler(self.lr_scheduler)
+        loss_cb = self.LossCallback()
+        lr_schedule = LearningRateScheduler(self.lr_scheduler)
+        if self.verbose==0:
+            if self.lr_decay != None:
+                cb = [loss_cb, lr_schedule]
+            else:
+                cb = [loss_cb]
+        else:
+            if self.lr_decay != None:
+                cb = [lr_schedule]
+            else:
+                cb = []
         start = time()
         fit = model.fit(self.X_train, self.y_train,
                         epochs           = self.num_epochs,
                         batch_size       = self.batch_size,
                         validation_split = 0.20,
                         shuffle          = True,
-                        #callbacks        = [loss_callback, lr_schedule],
+                        callbacks        = cb,
                         verbose          = self.verbose)
         train_time = time()-start
         print('Training Time: {:.2f} minutes'.format(train_time/60))
