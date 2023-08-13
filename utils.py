@@ -53,6 +53,8 @@ class SpatiotemporalCO2:
         self.criterion   = self.custom_loss
         self.loss_alpha  = 0.9
         self.L1L2_split  = 0.5
+        self.regular     = regularizers.l1(1e-4)
+        self.leaky_slope = 0.25
 
         self.num_epochs  = 100
         self.batch_size  = 24
@@ -127,52 +129,76 @@ class SpatiotemporalCO2:
             print('Select Schedule Type [1: halve every n epochs, 2: -0.1 exponential decay after n epochs]')
         return lr
 
-    def encoder_layer(self, inp, filt, kern=(3,3), pool=(2,2), pad='same', leaky_slope=0.1, reg=1e-4):
-        x = SeparableConv2D(filt, kern, padding=pad, activation=LeakyReLU(leaky_slope))(inp)
-        x = SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=regularizers.l2(reg))(x)
+    def encoder_layer(self, inp, filt, kern=(3,3), pool=(2,2), pad='same'):
+        x = SeparableConv2D(filt, kern, padding=pad, activation=LeakyReLU(self.leaky_slope))(inp)
+        x = SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=self.regular)(x)
         x = InstanceNormalization()(x)
-        x = LeakyReLU(leaky_slope)(x)
+        x = LeakyReLU(self.leaky_slope)(x)
         x = BatchNormalization()(x)
         x = AveragePooling2D(pool)(x)
         return x
     
-    def decoder_layer(self, inp, filt, kern=(3,3), pad='same', leaky_slope=0.1, reg=1e-4):
-        x = TimeDistributed(Conv2DTranspose(filt, kern, padding=pad, strides=2, activation=LeakyReLU(leaky_slope)))(inp)
-        x = TimeDistributed(Conv2D(filt, kern, padding=pad, kernel_regularizer=regularizers.l2(reg)))(x)
+    def decoder_layer(self, inp, filt, kern=(3,3), pad='same'):
+        x = TimeDistributed(Conv2DTranspose(filt, kern, padding=pad, strides=2, activation=LeakyReLU(self.leaky_slope)))(inp)
+        x = TimeDistributed(SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=self.regular))(x)
         x = InstanceNormalization()(x)
-        x = LeakyReLU(leaky_slope)(x)
+        x = LeakyReLU(self.leaky_slope)(x)
         x = BatchNormalization()(x)
         return x
+        ''' Another version:
+        x = ConvLSTM2D(filt, kern, padding=pad, return_sequences=True, activation=self.activ)(x)
+        x = InstanceNormalization()(x)
+        x = TimeDistributed(Conv2DTranspose(filt, kern, padding=pad, strides=2, kernel_regularizer=self.regular))(x)
+        x = LeakyReLU(leaky_slope)(x)
+        x = BatchNormalization()(x)
+        out:
+        x = TimeDistributed(Conv2D(2, (3,3), padding='same'))(x)
+        x = InstanceNormalization()(x)
+        x = BatchNormalization()(x)
+        x = Activation('sigmoid')(x)
+        '''
     
-    def recurrent_layer(self, inp, units1, units2, drop=0.1):
+    def recurrent_layer(self, inp, hidden_units, drop=0.1):
         height, width, channels = inp.shape[1:]
         x = tf.expand_dims(inp, -1)
-        x = tf.tile(x, (1, 1, 1, units1))
-        x = Reshape((np.prod(inp.shape[1:]), units1))(x)
+        x = tf.tile(x, (1, 1, 1, 1, hidden_units))
+        x = Reshape((np.prod(inp.shape[1:]), hidden_units))(x)
         x = LSTM(self.timesteps, return_sequences=True, dropout=drop)(x)
-        x = LSTM(units2, return_sequences=True, dropout=drop)(x)
         x = LSTM(self.timesteps, return_sequences=True, dropout=drop)(x)
         x = tf.transpose(x, [0,2,1])
         x = Reshape((self.timesteps, height, width, channels))(x)
         return x
+    
+    def out_layer(self, inp, kern=(3,3), pad='same', act='sigmoid'):
+        x = TimeDistributed(Conv2D(self.y_channels, kern, padding=pad))(inp)
+        x = InstanceNormalization()(x)
+        x = BatchNormalization()(x)
+        x = Activation(act)(x)
+        return x
        
     def make_model(self):
-        inp = Input(shape=(self.dim, self.dim, self.x_channels))
+        inputs = Input(shape=(self.dim, self.dim, self.x_channels))
         # Encoder
-        _ = self.encoder_layer(inp, 16)
-        _ = self.encoder_layer(_,   32)
-        z = self.encoder_layer(_,   64)
+        _ = self.encoder_layer(inputs, 16)
+        _ = self.encoder_layer(_,   64)
+        z = self.encoder_layer(_,   128)
         # Recurrence
-        zt = self.recurrent_layer(z, 30, 120)
+        z_inp = Input(z.shape[1:])
+        zt = self.recurrent_layer(z_inp, 30, 120)
         # Decoder
-        _ = self.decoder_layer(zt, 64)
-        _ = self.decoder_layer(_, 32)
+        zt_inp = Input(zt.shape[1:])
+        _ = self.decoder_layer(zt_inp, 128)
+        _ = self.decoder_layer(_, 64)
         _ = self.decoder_layer(_, 16)
-        out = TimeDistributed(Conv2D(self.y_channels, (3,3), padding='same'))(_)
         # Output
-        self.encoder = Model(inp, z)
-        self.dynamic = Model(z, zt)
-        self.model = Model(inp, out)
+        out = self.out_layer(_)
+        # Models
+        self.encoder = Model(inputs, z,   name='Encoder')
+        self.dynamic = Model(z_inp,  zt,  name='Dynamic')
+        self.decoder = Model(zt_inp, out, name='Decoder')
+        outputs = self.decoder(self.dynamic(self.encoder(inputs)))
+        self.model   = Model(inputs, outputs, name='CNN-RNN-Proxy')
+        # Return
         n_params = self.model.count_params()
         print('# Parameters: {:,}'.format(n_params))
         return self.model
