@@ -184,7 +184,7 @@ class SpatiotemporalCO2:
         z = self.encoder_layer(_,   128)
         # Recurrence
         z_inp = Input(z.shape[1:])
-        zt = self.recurrent_layer(z_inp, 30, 120)
+        zt = self.recurrent_layer(z_inp, 30)
         # Decoder
         zt_inp = Input(zt.shape[1:])
         _ = self.decoder_layer(zt_inp, 128)
