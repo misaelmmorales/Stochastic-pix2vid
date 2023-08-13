@@ -13,6 +13,7 @@ from skimage.metrics import mean_squared_error as img_mse
 from skimage.metrics import structural_similarity as img_ssim
 
 import tensorflow as tf
+from tensorflow.python.client import device_lib
 import keras.backend as K
 from keras import Model, regularizers
 from keras.layers import *
@@ -25,34 +26,39 @@ from tensorflow.keras.callbacks import LearningRateScheduler
 
 def check_tensorflow_gpu():
     sys_info = tf.sysconfig.get_build_info()
-    print('Checking Tensorflow Version:')
+    cuda_version, cudnn_version = sys_info['cuda_version'], sys_info['cudnn_version']
+    num_gpu_avail = len(tf.config.experimental.list_physical_devices('GPU'))
+    gpu_name = device_lib.list_local_devices()[1].physical_device_desc[17:40]
+    print('... Checking Tensorflow Version ...')
     print('Tensorflow built with CUDA?',  tf.test.is_built_with_cuda())
-    print('Tensorflow version:', tf.__version__)
-    print('# GPU available:', len(tf.config.experimental.list_physical_devices('GPU')))
-    print("CUDA: {} | cuDNN: {}".format(sys_info["cuda_version"], sys_info["cudnn_version"]))
-    print(tf.config.list_physical_devices())
+    print("TF: {} | CUDA: {} | cuDNN: {}".format(tf.__version__, cuda_version, cudnn_version))
+    print('# GPU available: {} ({})'.format(num_gpu_avail, gpu_name))
+    #print(tf.config.list_physical_devices())
     return None
 
 class SpatiotemporalCO2:
     def __init__(self):
+        K.clear_session()
         self.input_features_dir = 'simulations2D/input_features'
         self.output_targets_dir = 'simulations2D/output_targets'
 
         self.n_realizations = 1000
-        self.x_channels = 4
-        self.y_channels = 2
-        self.timesteps  = 60
-        self.dim        = 64
-        self.test_size  = 0.25
+        self.x_channels  = 4
+        self.y_channels  = 2
+        self.timesteps   = 60
+        self.dim         = 64
+        self.test_size   = 0.25
 
-        self.optimizer  = Nadam(learning_rate=1e-3)
-        self.criterion  = self.custom_loss
-        self.l2_alpha   = 0.9
+        self.optimizer   = Nadam(learning_rate=1e-3)
+        self.criterion   = self.custom_loss
+        self.loss_alpha  = 0.9
+        self.L1L2_split  = 0.5
 
-        self.num_epochs = 100
-        self.batch_size = 30
-        self.lr_decay   = 10
-        self.verbose    = 0
+        self.num_epochs  = 100
+        self.batch_size  = 24
+        self.lr_sch_type = 1
+        self.lr_decay    = 25
+        self.verbose     = 0
 
     def load_data(self):
         X_data = np.zeros((self.n_realizations, self.x_channels, self.dim, self.dim))
@@ -92,9 +98,14 @@ class SpatiotemporalCO2:
         plt.xticks(it[::ep//10]); plt.show()
 
     def custom_loss(self, true, pred):
-        mse_loss = MeanSquaredError()(true, pred)
         ssim_loss = tf.reduce_mean(1.0 - SSIM(true, pred, max_val=1.0))
-        combined_loss = self.l2_alpha * mse_loss + (1-self.l2_alpha) * ssim_loss
+        if self.L1L2_split != None:
+            mse_loss = MeanSquaredError()(true, pred)
+            mae_loss = MeanAbsoluteError()(true,pred)
+            ridge_loss = self.L1L2_split * mae_loss + (1-self.L1L2_split) * mse_loss
+        else:
+            ridge_loss = MeanSquaredError()(true, pred)
+        combined_loss = self.loss_alpha * ridge_loss + (1-self.loss_alpha) * ssim_loss
         return combined_loss
 
     class LossCallback(tf.keras.callbacks.Callback):
@@ -102,44 +113,47 @@ class SpatiotemporalCO2:
             if (epoch+1) % 10 == 0:
                 print('Epoch: {} - Loss: {:.4f} - Val Loss: {:.4f}'.format(epoch+1, logs['loss'], logs['val_loss']))
 
-    def lr_scheduler(self, epoch, lr, schedule_type=1):
-        if schedule_type == 1:
+    def lr_scheduler(self, epoch, lr):
+        if self.lr_sch_type == 1:
             if epoch % self.lr_decay == 0:
                 new_lr = lr * 0.5
                 return new_lr
-        elif schedule_type == 2:
+        elif self.lr_sch_type == 2:
             if epoch < self.lr_decay:
                 return lr
             else:
                 return lr * tf.math.exp(-0.1)
         else:
-            print('Select Type [1: halve every n epochs, 2: -0.1 exponential decay after n epochs]')
+            print('Select Schedule Type [1: halve every n epochs, 2: -0.1 exponential decay after n epochs]')
         return lr
 
-    def encoder_layer(self, inp, filt, kern=(3,3), pool=(2,2), pad='same', leaky_slope=0.1):
-        #x = SeparableConv2D(filters=filt, kernel_size=kern, padding=pad)(inp)
-        #x = SeparableConv2D(filters=filt, kernel_size=kern, padding=pad)(x)
-        #x = InstanceNormalization()(x)
-        #x = GELU()(x)
-        #x = AveragePooling2D(pool)(x)
-        x = Conv2D(filters=filt, kernel_size=kern, padding=pad, activation=LeakyReLU(leaky_slope))(inp)
-        x = Conv2D(filters=filt, kernel_size=kern, padding=pad, kernel_regularizer=regularizers.l2(1e-4))(x)
-        x = BatchNormalization()(x)
+    def encoder_layer(self, inp, filt, kern=(3,3), pool=(2,2), pad='same', leaky_slope=0.1, reg=1e-4):
+        x = SeparableConv2D(filt, kern, padding=pad, activation=LeakyReLU(leaky_slope))(inp)
+        x = SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=regularizers.l2(reg))(x)
+        x = InstanceNormalization()(x)
         x = LeakyReLU(leaky_slope)(x)
-        x = MaxPooling2D(pool)(x)
+        x = BatchNormalization()(x)
+        x = AveragePooling2D(pool)(x)
         return x
-
-    def decoder_layer(self, inp, filt, kern=(3,3), pad='same', drop=0.1, leaky_slope=0.1):
-        #x = ConvLSTM2D(filters=filt, kernel_size=kern, padding=pad, return_sequences=True, dropout=drop)(inp)
-        #x = TimeDistributed(SeparableConv2D(filters=filt, kernel_size=kern, padding=pad))(x)
-        #x = TimeDistributed(Conv2DTranspose(filters=filt, kernel_size=kern, padding=pad, strides=2))(x)
-        #x = InstanceNormalization()(x)
-        #x = GELU()(x)
-        x = TimeDistributed(UpSampling2D())(inp)
-        x = ConvLSTM2D(filters=filt, kernel_size=kern, padding=pad, return_sequences=True, dropout=drop, activation=LeakyReLU(leaky_slope))(x)
-        x = TimeDistributed(Conv2DTranspose(filters=filt, kernel_size=kern, padding=pad, strides=1, kernel_regularizer=regularizers.l2(1e-4)))(x)
-        x = BatchNormalization()(x)
+    
+    def decoder_layer(self, inp, filt, kern=(3,3), pad='same', leaky_slope=0.1, reg=1e-4):
+        x = TimeDistributed(Conv2DTranspose(filt, kern, padding=pad, strides=2, activation=LeakyReLU(leaky_slope)))(inp)
+        x = TimeDistributed(Conv2D(filt, kern, padding=pad, kernel_regularizer=regularizers.l2(reg)))(x)
+        x = InstanceNormalization()(x)
         x = LeakyReLU(leaky_slope)(x)
+        x = BatchNormalization()(x)
+        return x
+    
+    def recurrent_layer(self, inp, units1, units2, drop=0.1):
+        height, width, channels = inp.shape[1:]
+        x = tf.expand_dims(inp, -1)
+        x = tf.tile(x, (1, 1, 1, units1))
+        x = Reshape((np.prod(inp.shape[1:]), units1))(x)
+        x = LSTM(self.timesteps, return_sequences=True, dropout=drop)(x)
+        x = LSTM(units2, return_sequences=True, dropout=drop)(x)
+        x = LSTM(self.timesteps, return_sequences=True, dropout=drop)(x)
+        x = tf.transpose(x, [0,2,1])
+        x = Reshape((self.timesteps, height, width, channels))(x)
         return x
        
     def make_model(self):
@@ -149,15 +163,15 @@ class SpatiotemporalCO2:
         _ = self.encoder_layer(_,   32)
         z = self.encoder_layer(_,   64)
         # Recurrence
-        _ = tf.expand_dims(z, 1)
-        _ = tf.tile(_, (1, self.timesteps, 1, 1, 1))
+        zt = self.recurrent_layer(z, 30, 120)
         # Decoder
-        _ = self.decoder_layer(_, 64)
+        _ = self.decoder_layer(zt, 64)
         _ = self.decoder_layer(_, 32)
         _ = self.decoder_layer(_, 16)
         out = TimeDistributed(Conv2D(self.y_channels, (3,3), padding='same'))(_)
         # Output
         self.encoder = Model(inp, z)
+        self.dynamic = Model(z, zt)
         self.model = Model(inp, out)
         n_params = self.model.count_params()
         print('# Parameters: {:,}'.format(n_params))
