@@ -122,7 +122,8 @@ class SpatiotemporalCO2:
         #x = InstanceNormalization()(x)
         #x = GELU()(x)
         #x = AveragePooling2D(pool)(x)
-        x = Conv2D(filters=filt, kernel_size=kern, padding=pad)(inp)
+        x = Conv2D(filters=filt, kernel_size=kern, padding=pad, activation=LeakyReLU(leaky_slope))(inp)
+        x = Conv2D(filters=filt, kernel_size=kern, padding=pad, kernel_regularizer=regularizers.l2(1e-4))(x)
         x = BatchNormalization()(x)
         x = LeakyReLU(leaky_slope)(x)
         x = MaxPooling2D(pool)(x)
@@ -135,7 +136,8 @@ class SpatiotemporalCO2:
         #x = InstanceNormalization()(x)
         #x = GELU()(x)
         x = TimeDistributed(UpSampling2D())(inp)
-        x = ConvLSTM2D(filters=filt, kernel_size=kern, padding=pad, return_sequences=True, dropout=drop)(x)
+        x = ConvLSTM2D(filters=filt, kernel_size=kern, padding=pad, return_sequences=True, dropout=drop, activation=LeakyReLU(leaky_slope))(x)
+        x = TimeDistributed(Conv2DTranspose(filters=filt, kernel_size=kern, padding=pad, strides=1, kernel_regularizer=regularizers.l2(1e-4)))(x)
         x = BatchNormalization()(x)
         x = LeakyReLU(leaky_slope)(x)
         return x
@@ -145,9 +147,9 @@ class SpatiotemporalCO2:
         # Encoder
         _ = self.encoder_layer(inp, 16)
         _ = self.encoder_layer(_,   32)
-        _ = self.encoder_layer(_,   64)
+        z = self.encoder_layer(_,   64)
         # Recurrence
-        _ = tf.expand_dims(_, 1)
+        _ = tf.expand_dims(z, 1)
         _ = tf.tile(_, (1, self.timesteps, 1, 1, 1))
         # Decoder
         _ = self.decoder_layer(_, 64)
@@ -155,6 +157,7 @@ class SpatiotemporalCO2:
         _ = self.decoder_layer(_, 16)
         out = TimeDistributed(Conv2D(self.y_channels, (3,3), padding='same'))(_)
         # Output
+        self.encoder = Model(inp, z)
         self.model = Model(inp, out)
         n_params = self.model.count_params()
         print('# Parameters: {:,}'.format(n_params))
