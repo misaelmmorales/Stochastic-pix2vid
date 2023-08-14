@@ -153,11 +153,13 @@ class decoder_layer(nn.Module):
     def __init__(self, in_ch, out_ch, leaky_slope=0.2):
         super(decoder_layer, self).__init__()
         self.space_conv = nn.ConvTranspose3d(in_ch, out_ch, (1,2,2), stride=(1,2,2))
+        self.conv = nn.Conv3d(out_ch, out_ch, 3, padding=1)
         #self.time_conv  = TFNO((16,16), (in_ch+out_ch)//2, in_ch, out_ch)
         self.activ      = nn.LeakyReLU(leaky_slope)
         self.bnorm      = nn.BatchNorm3d(out_ch)
     def forward(self, x):
         x = self.space_conv(x)
+        x = self.conv(x)
         #x = self.time_conv(x)
         x = self.activ(x)
         x = self.bnorm(x)
@@ -185,10 +187,10 @@ class ProxyModel(nn.Module):
         self.encoder = nn.Sequential(
             encoder_layer(4,  16,  hidden=8),
             encoder_layer(16, 64,  hidden=32),
-            encoder_layer(64, 256, hidden=128))
+            encoder_layer(64, 128, hidden=96))
         self.recurrence = recurrent_layer(30)
         self.decoder = nn.Sequential(
-            decoder_layer(256, 64),
+            decoder_layer(128, 64),
             decoder_layer(64, 16),
             decoder_layer(16, 4))
         self.out_layer = nn.Sequential(
