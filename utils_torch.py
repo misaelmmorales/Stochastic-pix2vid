@@ -19,8 +19,11 @@ from neuralop import LpLoss, H1Loss
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 from torchvision.models import VisionTransformer
+from torch.utils.data import random_split
 from torchmetrics.image import StructuralSimilarityIndexMeasure as torch_SSIM
 
 class torch_SpatioTemporalCO2:
@@ -38,8 +41,13 @@ class torch_SpatioTemporalCO2:
         self.timesteps   = 60
         self.dim         = 64
         self.test_size   = 0.25
+        self.valid_split = 0.8
 
         self.batch_size = 32
+        self.num_epochs = 100
+        self.lr         = 1e-3
+        self.decay      = 1e-5
+        self.monitor    = 10
 
     def check_torch_gpu(self):
         '''
@@ -83,6 +91,48 @@ class torch_SpatioTemporalCO2:
         self.test_dataloader  = DataLoader(self.test_dataset,  batch_size=self.batch_size, shuffle=True)
         return self.train_dataloader, self.test_dataloader, self.train_dataset, self.test_dataset
     
+    def trainer(self):
+        model = ProxyModel()
+        model.to(self.device)
+        print('# Parameters: {:,}'.format(count_params(model)))
+        optimizer = optim.NAdam(model.parameters(), lr=self.lr, weight_decay=self.decay)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=30)
+        criterion = CustomLoss().to(self.device)
+
+        for epoch in range(self.num_epochs):
+            model.train()
+            train_loss = 0.0
+            tot_train_loss = []
+            train_subset_size = int(len(self.train_dataset) * self.valid_split)
+            train_subset, val_subset = random_split(self.train_dataset, [train_subset_size, len(self.train_dataset)-train_subset_size])
+            train_dataloader = DataLoader(train_subset, batch_size=self.batch_size, shuffle=True)
+            valid_dataloader = DataLoader(val_subset, batch_size=self.batch_size, shuffle=True)
+            for batch_idx, (x,y) in enumerate(train_dataloader):
+                x, y = x.float().to(self.device), y.float().to(self.device)
+                optimizer.zero_grad()
+                y_pred = model(x)
+                loss = criterion(y_pred, y)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
+            tot_train_loss = train_loss/len(train_dataloader)
+
+            model.eval()
+            val_loss = 0.0
+            tot_val_loss = []
+            with torch.no_grad():
+                for batch_idx, (x,y) in enumerate(valid_dataloader):
+                    x, y = x.float().to(self.device), y.float().to(self.device)
+                    y_pred = model(x)
+                    loss = criterion(y_pred, y)
+                    val_loss += loss.item()
+                tot_val_loss = val_loss/len(valid_dataloader)
+            
+            if (epoch+1) % self.monitor == 0:
+                print('Epoch: [{}/{}] | Loss: {:.4f} | Validation Loss: {:.4f}'.format(epoch+1, self.num_epochs, tot_train_loss, tot_val_loss))
+        print('Training finished.')
+        return model
+
 class encoder_layer(nn.Module):
     def __init__(self, in_ch, out_ch, hidden, n_modes=(16,16), lifting=256, projection=256, n_layers=4, separable=True, leaky_slope=0.2):
         super(encoder_layer, self).__init__()
@@ -135,14 +185,14 @@ class ProxyModel(nn.Module):
         self.encoder = nn.Sequential(
             encoder_layer(4,  16,  hidden=8),
             encoder_layer(16, 64,  hidden=32),
-            encoder_layer(64, 128, hidden=96))
+            encoder_layer(64, 256, hidden=128))
         self.recurrence = recurrent_layer(30)
         self.decoder = nn.Sequential(
-            decoder_layer(128, 64),
-            decoder_layer(64, 32),
-            decoder_layer(32, 16))
+            decoder_layer(256, 64),
+            decoder_layer(64, 16),
+            decoder_layer(16, 4))
         self.out_layer = nn.Sequential(
-            nn.Conv3d(16, 2, kernel_size=3, padding=1),
+            nn.Conv3d(4, 2, kernel_size=3, padding=1),
             nn.Sigmoid())
     def forward(self, x):
         x = self.encoder(x)
@@ -152,72 +202,26 @@ class ProxyModel(nn.Module):
         x = torch.moveaxis(x, 2, 1)
         return x
 
-
 class CustomLoss(nn.Module):
     def __init__(self, mse_weight=(2/3), ridge_weight=0.8):
         super(CustomLoss, self).__init__()
-        self.mse_weight = mse_weight
+        self.mse_weight   = mse_weight
         self.ridge_weight = ridge_weight
         self.ssim = torch_SSIM(data_range=1.0)
 
     def forward(self, output, target):
         # ridge loss
-        mse_loss = F.mse_loss(output, target)
-        mae_loss = F.l1_loss(output, target)
+        mse_loss   = F.mse_loss(output, target)
+        mae_loss   = F.l1_loss(output, target)
         ridge_loss = self.mse_weight * mse_loss + (1-self.mse_weight) * mae_loss
         # ssim loss
         ssim_losses = []
         for t in range(output.size(1)):
-                pred_single = output[:, t]
+                pred_single   = output[:, t]
                 target_single = target[:, t]
-                ssim_loss = 1 - self.ssim(pred_single, target_single)
+                ssim_loss     = 1 - self.ssim(pred_single, target_single)
                 ssim_losses.append(ssim_loss)
         ssim_loss = torch.stack(ssim_losses).mean()
         # total loss
         loss = self.ridge_weight * ridge_loss + (1-self.ridge_weight) * ssim_loss
         return loss
-
-
-''' 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ProxyModel()
-model.to(device)
-
-criterion  = CustomLoss().to(device)
-optimizer  = torch.optim.NAdam(model.parameters(), lr=0.001)
-num_epochs = 20
-
-for epoch in range(num_epochs):
-    model.train()
-    train_loss = 0.0
-
-    train_subset_size = int(len(train_dataset) * 0.8)  # 80% for training
-    train_subset, val_subset = torch.utils.data.random_split(train_dataset, [train_subset_size, len(train_dataset) - train_subset_size])
-    train_dataloader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
-    valid_dataloader = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
-
-    for batch_idx, (x, y) in enumerate(train_dataloader):
-        x, y = x.float().to(device), y.float().to(device)
-        optimizer.zero_grad()
-        y_pred = model(x)
-        loss = criterion(y_pred, y)
-        loss.backward()
-        optimizer.step()
-        train_loss += loss.item()
-    tot_train_loss = train_loss/len(train_dataloader)
-
-    model.eval()
-    val_loss = 0.0
-    with torch.no_grad():
-        for batch_idx, (x, y) in enumerate(valid_dataloader):
-            x, y = x.float().to(device), y.float().to(device)
-            y_pred = model(x)
-            loss = criterion(y_pred, y)
-            val_loss += loss.item()
-    tot_valid_loss = val_loss/len(valid_dataloader)
-    
-    if (epoch+1) % 5 == 0:
-        print('Epoch: [{}/{}] | Loss: {:.4f} | Validation Loss: {:.4f}'.format(epoch+1, num_epochs, tot_train_loss, tot_valid_loss))
-
-print("Training finished.")
-'''
