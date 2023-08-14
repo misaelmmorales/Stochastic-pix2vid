@@ -52,7 +52,7 @@ class SpatiotemporalCO2:
         self.optimizer   = Nadam(learning_rate=1e-3)
         self.criterion   = self.custom_loss
         self.loss_alpha  = 0.9
-        self.L1L2_split  = 0.5
+        self.L1L2_split  = 0.66
         self.regular     = regularizers.l1(1e-4)
         self.leaky_slope = 0.25
 
@@ -80,7 +80,7 @@ class SpatiotemporalCO2:
         y_reshaped  = self.y_data.reshape(num*tsteps, -1)
         y_scaled    = MinMaxScaler().fit_transform(y_reshaped)
         self.y_norm = y_scaled.reshape(num, tsteps, height, width, channels)
-        print('normalized - X: {} | y: {}'.format(self.X_norm.shape, self.y_norm.shape)) 
+        print('MinMax Normalization Done!') 
         if subsample != None:
             print('Subsampling data for {} samples ...'.format(subsample))
             idx = np.random.choice(range(self.n_realizations), subsample, replace=False)
@@ -129,34 +129,38 @@ class SpatiotemporalCO2:
             print('Select Schedule Type [1: halve every n epochs, 2: -0.1 exponential decay after n epochs]')
         return lr
 
-    def encoder_layer(self, inp, filt, kern=(3,3), pool=(2,2), pad='same'):
+    def encoder_layer(self, inp, filt, kern=2, pad='same'):
         x = SeparableConv2D(filt, kern, padding=pad, activation=LeakyReLU(self.leaky_slope))(inp)
         x = SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=self.regular)(x)
-        x = InstanceNormalization()(x)
+        #x = InstanceNormalization()(x)
         x = LeakyReLU(self.leaky_slope)(x)
         x = BatchNormalization()(x)
-        x = AveragePooling2D(pool)(x)
+        x = MaxPooling2D()(x)
         return x
     
-    def decoder_layer(self, inp, filt, kern=(3,3), pad='same'):
+    def decoder_layer(self, inp, filt, kern_s=(1,2,2), stride_s=(1,2,2), kern_t=(3,1,1), pad='same'):
+        '''
         x = TimeDistributed(Conv2DTranspose(filt, kern, padding=pad, strides=2, activation=LeakyReLU(self.leaky_slope)))(inp)
         x = TimeDistributed(SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=self.regular))(x)
-        x = InstanceNormalization()(x)
-        x = LeakyReLU(self.leaky_slope)(x)
-        x = BatchNormalization()(x)
+        x = TimeDistributed(InstanceNormalization())(x)
+        x = TimeDistributed(LeakyReLU(self.leaky_slope))(x)
+        x = TimeDistributed(BatchNormalization())(x)
         return x
-        ''' Another version:
-        x = ConvLSTM2D(filt, kern, padding=pad, return_sequences=True, activation=self.activ)(x)
+        ____
+        Another version:
+        x = ConvLSTM2D(filt, kern, padding=pad, return_sequences=True, activation=self.activ)(inp)
         x = InstanceNormalization()(x)
         x = TimeDistributed(Conv2DTranspose(filt, kern, padding=pad, strides=2, kernel_regularizer=self.regular))(x)
         x = LeakyReLU(leaky_slope)(x)
         x = BatchNormalization()(x)
-        out:
-        x = TimeDistributed(Conv2D(2, (3,3), padding='same'))(x)
-        x = InstanceNormalization()(x)
-        x = BatchNormalization()(x)
-        x = Activation('sigmoid')(x)
+        return x
         '''
+        x = Conv3DTranspose(filt, kern_s, strides=stride_s, padding=pad, kernel_regularizer=self.regular)(inp)
+        x = Conv3DTranspose(filt, kern_t, padding=pad, kernel_regularizer=self.regular)(x)
+        #x = InstanceNormalization()(x)
+        x = LeakyReLU(self.leaky_slope)(x)
+        x = BatchNormalization()(x)
+        return x 
     
     def recurrent_layer(self, inp, hidden_units, drop=0.1):
         height, width, channels = inp.shape[1:]
@@ -172,8 +176,8 @@ class SpatiotemporalCO2:
     def out_layer(self, inp, kern=(3,3), pad='same', act='sigmoid'):
         x = TimeDistributed(Conv2D(self.y_channels, kern, padding=pad))(inp)
         x = InstanceNormalization()(x)
-        x = BatchNormalization()(x)
-        x = Activation(act)(x)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation(act))(x)
         return x
        
     def make_model(self):
@@ -198,9 +202,6 @@ class SpatiotemporalCO2:
         self.decoder = Model(zt_inp, out, name='Decoder')
         outputs = self.decoder(self.dynamic(self.encoder(inputs)))
         self.model   = Model(inputs, outputs, name='CNN-RNN-Proxy')
-        # Return
-        n_params = self.model.count_params()
-        print('# Parameters: {:,}'.format(n_params))
         return self.model
 
     def train(self, model):
@@ -217,6 +218,8 @@ class SpatiotemporalCO2:
                 cb = [lr_schedule]
             else:
                 cb = []
+        n_params = self.model.count_params()
+        print('# Parameters: {:,}'.format(n_params))
         start = time()
         fit = model.fit(self.X_train, self.y_train,
                         epochs           = self.num_epochs,

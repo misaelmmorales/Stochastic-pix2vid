@@ -1,10 +1,20 @@
-import os
+import os, sys
+from time import time
 import numpy as np
 import pandas as pd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 
 from scipy.io import loadmat, savemat
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
+from skimage.metrics import mean_squared_error as img_mse
+from skimage.metrics import structural_similarity as img_ssim
+
+from neuralop.models import TFNO
+from neuralop.utils import count_params
+from neuralop import LpLoss, H1Loss
 
 import torch
 import torch.nn as nn
@@ -13,176 +23,148 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.models import VisionTransformer
 from torchmetrics.image import StructuralSimilarityIndexMeasure as torch_SSIM
 
-# Define custom dataset classes for train and test sets
-class CustomDataset(Dataset):
-    def __init__(self, filenames):
-        self.root_X,      self.root_y      = 'simulations2D/input_features', 'simulations2D/output_targets'
-        self.filenames_X, self.filenames_y = filenames
+class torch_SpatioTemporalCO2:
+    def __init__(self):
+        self.input_features_dir = 'simulations2D/input_features'
+        self.X_filenames        = os.listdir(self.input_features_dir)
+        self.output_targets_dir = 'simulations2D/output_targets'
+        self.y_filenames        =  os.listdir(self.output_targets_dir)
 
-    def __len__(self):
-        return len(self.filenames_X)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    def __getitem__(self, idx):
-        X_path = os.path.join(self.root_X, self.filenames_X[idx])
-        y_path = os.path.join(self.root_y, self.filenames_y[idx])
-        X_array, y_array = np.load(X_path), np.load(y_path)
-        
-        X_normalized = (X_array - X_array.min()) / (X_array.max() - X_array.min())
-        y_normalized = (y_array - y_array.min()) / (y_array.max() - y_array.min())
-        X_tensor = torch.from_numpy(X_normalized)
-        y_tensor = torch.from_numpy(y_normalized)
-        return X_tensor, y_tensor
+        self.n_realizations = 1000
+        self.x_channels  = 4
+        self.y_channels  = 2
+        self.timesteps   = 60
+        self.dim         = 64
+        self.test_size   = 0.25
+
+        self.batch_size = 32
+
+    def check_torch_gpu(self):
+        '''
+        Check torch build in python to ensure GPU is available for training.
+        '''
+        torch_version, cuda_avail = torch.__version__, torch.cuda.is_available()
+        count, name = torch.cuda.device_count(), torch.cuda.get_device_name()
+        py_version, conda_env_name = sys.version, sys.executable.split('\\')[-2]
+        print('-------------------------------------------------')
+        print('------------------ VERSION INFO -----------------')
+        print('Conda Environment: {}'.format(conda_env_name))
+        print('Torch version: {}'.format(torch_version))
+        print('Torch build with CUDA? {}'.format(cuda_avail))
+        print('# Device(s) available: {}, Name(s): {}\n'.format(count, name))
+        self.device = torch.device('cuda' if cuda_avail else 'cpu')
+        return self.device
+
+    # Define custom dataset classes for train and test sets
+    class CustomDataset(Dataset):
+        def __init__(self, filenames):
+            self.root_X = torch_SpatioTemporalCO2().input_features_dir
+            self.root_y = torch_SpatioTemporalCO2().output_targets_dir
+            self.filenames_X, self.filenames_y = filenames
+        def __len__(self):
+            return len(self.filenames_X)
+        def __getitem__(self, idx):
+            X_path = os.path.join(self.root_X, self.filenames_X[idx])
+            y_path = os.path.join(self.root_y, self.filenames_y[idx])
+            X_array, y_array = np.load(X_path), np.load(y_path)
+            X_normalized = (X_array - X_array.min()) / (X_array.max() - X_array.min())
+            y_normalized = (y_array - y_array.min()) / (y_array.max() - y_array.min())
+            X_tensor = torch.from_numpy(X_normalized)
+            y_tensor = torch.from_numpy(y_normalized)
+            return X_tensor, y_tensor
+
+    def make_dataloaders(self):
+        X_train_fname, X_test_fname, y_train_fname, y_test_fname = train_test_split(self.X_filenames, self.y_filenames, test_size=self.test_size)
+        self.train_dataset = self.CustomDataset([X_train_fname, y_train_fname])
+        self.test_dataset  = self.CustomDataset([X_test_fname,  y_test_fname])
+        self.train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
+        self.test_dataloader  = DataLoader(self.test_dataset,  batch_size=self.batch_size, shuffle=True)
+        return self.train_dataloader, self.test_dataloader, self.train_dataset, self.test_dataset
     
-# Define your root folders
-X_fname, y_fname = os.listdir('simulations2D/input_features'), os.listdir('simulations2D/output_targets')
-X_train_fname, X_test_fname, y_train_fname, y_test_fname = train_test_split(X_fname, y_fname, test_size=0.25, random_state=42)
-
-# Create custom dataset instances for train and test sets
-train_dataset = CustomDataset([X_train_fname, y_train_fname])
-test_dataset  = CustomDataset([X_test_fname,  y_test_fname])
-
-# Create dataloaders for train and test sets
-batch_size = 32
-train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-test_dataloader  = DataLoader(test_dataset,  batch_size=batch_size, shuffle=False)
-
-### Separable Convolutions ###
-class SeparableConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=(3,3), bias=False):
-        super(SeparableConv2d, self).__init__()
-        self.depthwise = nn.Conv2d(in_channels, in_channels,  kernel_size=kernel_size, groups=in_channels, bias=bias, padding=1)
-        self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias)
-    
+class encoder_layer(nn.Module):
+    def __init__(self, in_ch, out_ch, hidden, n_modes=(16,16), lifting=256, projection=256, n_layers=4, separable=True, leaky_slope=0.2):
+        super(encoder_layer, self).__init__()
+        self.fno   = TFNO(n_modes, hidden, in_ch, out_ch, lifting, projection, n_layers, separable=True)
+        self.inorm = nn.InstanceNorm2d(out_ch)
+        self.activ = nn.LeakyReLU(leaky_slope)
+        self.bnorm = nn.BatchNorm2d(out_ch)
+        self.pool  = nn.MaxPool2d(2,2)
     def forward(self, x):
-        out = self.depthwise(x)
-        out = self.pointwise(out)
-        return out
-
-### Time-Distributed Layer ###
-class TimeDistributedModule(nn.Module):
-    def __init__(self, module):
-        super(TimeDistributedModule, self).__init__()
-        self.module = module
-    
-    def forward(self, x):
-        batch_size, time_steps, channels, height, width = x.size()
-        x = x.reshape(-1, channels, height, width)
-        module_output = self.module(x)
-        module_output = module_output.reshape(batch_size, time_steps, -1, module_output.size(2), module_output.size(3))
-        return module_output
-
-
-### Convolutional (Encoder) block ###
-class conv_block(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(conv_block, self).__init__()
-        self.conv1 = SeparableConv2d(in_channels, in_channels)
-        self.conv2 = SeparableConv2d(in_channels, out_channels)
-        self.norm = nn.InstanceNorm2d(out_channels)
-        self.actv = nn.GELU()
-        self.pool = nn.AvgPool2d(kernel_size=2, stride=2)
-
-    def forward(self, x):
-        x = self.conv2(self.conv1(x))
-        x = self.norm(x)
-        x = self.actv(x)
+        x = self.fno(x)
+        x = self.inorm(x)
+        x = self.activ(x)
+        x = self.bnorm(x)
         x = self.pool(x)
         return x
 
-### Transpose Convolutional (Decoder) block ###
-class decon_block(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(decon_block, self).__init__()
-        self.deconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.norm = nn.InstanceNorm2d(out_channels)
-        self.actv = nn.GELU()
-
+class decoder_layer(nn.Module):
+    def __init__(self, in_ch, out_ch, leaky_slope=0.2):
+        super(decoder_layer, self).__init__()
+        self.space_conv = nn.ConvTranspose3d(in_ch, out_ch, (1,2,2), stride=(1,2,2))
+        #self.time_conv  = TFNO((16,16), (in_ch+out_ch)//2, in_ch, out_ch)
+        self.activ      = nn.LeakyReLU(leaky_slope)
+        self.bnorm      = nn.BatchNorm3d(out_ch)
     def forward(self, x):
-        x = self.deconv(x)
-        x = self.norm(x)
-        x = self.actv(x)
+        x = self.space_conv(x)
+        #x = self.time_conv(x)
+        x = self.activ(x)
+        x = self.bnorm(x)
         return x
 
-### Vision Transformer ####
-class VisionTransformer(nn.Module):
-    def __init__(self, input_channels, output_channels):
-        super(VisionTransformer, self).__init__()
-        self.projector = nn.Sequential(
-            nn.Conv2d(input_channels, output_channels, kernel_size=1),
-            nn.GELU())
-        self.attention = nn.MultiheadAttention(embed_dim=output_channels, num_heads=16)
-        self.ffn = nn.Sequential(
-            nn.Linear(output_channels, output_channels),
-            nn.GELU(),
-            nn.Linear(output_channels, output_channels))
-
+class recurrent_layer(nn.Module):
+    def __init__(self, repeats):
+        super(recurrent_layer, self).__init__()
+        self.repeats = repeats
+        self.lstm1 = nn.LSTM(batch_first=True, input_size=self.repeats, hidden_size=60)
+        self.lstm2 = nn.LSTM(batch_first=True, input_size=60, hidden_size=60)
     def forward(self, x):
-        projected_x = self.projector(x)
-        batch_size, channels, height, width = projected_x.size()
-        x_reshaped = projected_x.view(batch_size, channels, -1).permute(2, 0, 1)
-        attended_x, _ = self.attention(x_reshaped, x_reshaped, x_reshaped)
-        attended_x = attended_x.permute(1, 2, 0).view(batch_size, channels, height, width)
-        attended_x = attended_x.permute(0, 2, 1, 3).contiguous().view(batch_size, height * width, channels)
-        ffn_output = self.ffn(attended_x)
-        ffn_output = ffn_output.view(batch_size, height, width, channels).permute(0, 3, 1, 2)
-        return ffn_output
+        batch_size, channels, height, width = x.shape
+        x = x.view(batch_size, channels*height*width, 1).repeat(1, 1, self.repeats)
+        x, _ = self.lstm1(x)
+        x, _ = self.lstm2(x)
+        x = torch.moveaxis(x, -1, 1)
+        x = x.view(batch_size, 60, channels, height, width)
+        x = torch.moveaxis(x, 1, 2)
+        return x
 
-### Recurrent Block ###
-class RecurrentBlock(nn.Module):
-    def __init__(self, input_dim, hidden_dim, timesteps=60, im_size=16):
-        super(RecurrentBlock, self).__init__()
-        self.timesteps = timesteps
-        self.im_size = im_size
-        self.input_dim, self.hidden_dim = input_dim, hidden_dim
-        self.lstm = nn.LSTM(batch_first = True,
-                            input_size  = self.input_dim * self.im_size * self.im_size, 
-                            hidden_size = self.hidden_dim * self.im_size * self.im_size)
-        
-    def forward(self, x):
-        batch_size, channels, height, width = x.size()
-        x_reshaped = x.reshape(batch_size, channels*height*width)
-        x_repeated = x_reshaped.view(batch_size, 1, channels*height*width).repeat(1, self.timesteps, 1)
-        x_recurrent, _ = self.lstm(x_repeated)
-        
-        # Reshape the LSTM output to match the dimensions
-        x_output = x_recurrent.view(batch_size, self.timesteps, self.hidden_dim, self.im_size, self.im_size)
-        return x_output
-    
 class ProxyModel(nn.Module):
     def __init__(self):
         super(ProxyModel, self).__init__()
-
         self.encoder = nn.Sequential(
-            conv_block(4, 8),
-            conv_block(8, 16),
-            conv_block(16, 32))
-
-        self.vit = VisionTransformer(32, 64)
-        
-        self.recurrent = RecurrentBlock(64, 32, im_size=2**3)
-        
+            encoder_layer(4,  16,  hidden=8),
+            encoder_layer(16, 64,  hidden=32),
+            encoder_layer(64, 128, hidden=96))
+        self.recurrence = recurrent_layer(30)
         self.decoder = nn.Sequential(
-            TimeDistributedModule(decon_block(32, 16)),
-            TimeDistributedModule(decon_block(16, 8)),
-            TimeDistributedModule(decon_block(8, 2)))
-
+            decoder_layer(128, 64),
+            decoder_layer(64, 32),
+            decoder_layer(32, 16))
+        self.out_layer = nn.Sequential(
+            nn.Conv3d(16, 2, kernel_size=3, padding=1),
+            nn.Sigmoid())
     def forward(self, x):
-        encoded     = self.encoder(x)
-        vit_encoded = self.vit(encoded)
-        rnn_encoded = self.recurrent(vit_encoded)
-        decoded     = self.decoder(rnn_encoded)
-        return decoded
+        x = self.encoder(x)
+        x = self.recurrence(x)
+        x = self.decoder(x)
+        x = self.out_layer(x)
+        x = torch.moveaxis(x, 2, 1)
+        return x
+
 
 class CustomLoss(nn.Module):
-    def __init__(self, mse_weight=0.5, ssim_weight=0.5):
+    def __init__(self, mse_weight=(2/3), ridge_weight=0.8):
         super(CustomLoss, self).__init__()
         self.mse_weight = mse_weight
-        self.ssim_weight = ssim_weight
+        self.ridge_weight = ridge_weight
         self.ssim = torch_SSIM(data_range=1.0)
 
     def forward(self, output, target):
-        # mse loss
+        # ridge loss
         mse_loss = F.mse_loss(output, target)
+        mae_loss = F.l1_loss(output, target)
+        ridge_loss = self.mse_weight * mse_loss + (1-self.mse_weight) * mae_loss
         # ssim loss
         ssim_losses = []
         for t in range(output.size(1)):
@@ -192,9 +174,11 @@ class CustomLoss(nn.Module):
                 ssim_losses.append(ssim_loss)
         ssim_loss = torch.stack(ssim_losses).mean()
         # total loss
-        loss = self.mse_weight * mse_loss + self.ssim_weight * ssim_loss
+        loss = self.ridge_weight * ridge_loss + (1-self.ridge_weight) * ssim_loss
         return loss
-    
+
+
+''' 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = ProxyModel()
 model.to(device)
@@ -236,4 +220,4 @@ for epoch in range(num_epochs):
         print('Epoch: [{}/{}] | Loss: {:.4f} | Validation Loss: {:.4f}'.format(epoch+1, num_epochs, tot_train_loss, tot_valid_loss))
 
 print("Training finished.")
-
+'''
