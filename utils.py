@@ -48,16 +48,17 @@ class SpatiotemporalCO2:
         self.timesteps   = 60
         self.dim         = 64
         self.test_size   = 0.25
+        self.t_samples   = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60]
 
         self.optimizer   = Nadam(learning_rate=1e-3)
         self.criterion   = self.custom_loss
-        self.loss_alpha  = 0.9
-        self.L1L2_split  = 0.66
+        self.L1L2_split  = 0.25
+        self.loss_alpha  = 0.8
         self.regular     = regularizers.l1(1e-4)
         self.leaky_slope = 0.25
 
         self.num_epochs  = 100
-        self.batch_size  = 24
+        self.batch_size  = 30
         self.lr_sch_type = 1
         self.lr_decay    = 25
         self.verbose     = 0
@@ -82,17 +83,19 @@ class SpatiotemporalCO2:
         self.y_norm = y_scaled.reshape(num, tsteps, height, width, channels)
         print('MinMax Normalization Done!') 
         if subsample != None:
-            print('Subsampling data for {} samples ...'.format(subsample))
+            print('Subsampling data for {} samples, {} timesteps ...'.format(subsample, len(self.t_samples)))
             idx = np.random.choice(range(self.n_realizations), subsample, replace=False)
-            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm[idx], self.y_norm[idx], test_size=self.test_size)
+            ts = np.array(self.t_samples); ts[1:]-=1
+            self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm[idx], self.y_norm[idx][:,ts], test_size=self.test_size)
         else:
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm, self.y_norm, test_size=self.test_size)
         print('Train - X: {} | y: {}'.format(self.X_train.shape, self.y_train.shape))
         print('Test  - X: {} | y: {}'.format(self.X_test.shape, self.y_test.shape))
 
-    def plot_loss(self, fit):
+    def plot_loss(self, fit, figsize=(4,3)):
         ep = len(fit.history['loss'])
         it = np.arange(ep)
+        plt.figure(figsize=figsize)
         plt.plot(it, fit.history['loss'], '-', label='loss')
         plt.plot(it, fit.history['val_loss'], '-', label='validation loss')
         plt.title('Training: Loss vs. Epochs'); plt.legend()
@@ -129,53 +132,37 @@ class SpatiotemporalCO2:
             print('Select Schedule Type [1: halve every n epochs, 2: -0.1 exponential decay after n epochs]')
         return lr
 
-    def encoder_layer(self, inp, filt, kern=2, pad='same'):
-        x = SeparableConv2D(filt, kern, padding=pad, activation=LeakyReLU(self.leaky_slope))(inp)
-        x = SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=self.regular)(x)
-        #x = InstanceNormalization()(x)
+    def encoder_layer(self, inp, filt, kern=3, pad='same'):
+        x = SeparableConv2D(filt, kern, padding=pad)(inp)
+        xf = tf.math.real(tf.signal.fft2d(tf.cast(x, tf.complex64)))
+        x = LayerNormalization()(x+xf)
+        x = Conv2D(filt, kern, padding='same')(x)
+        x = InstanceNormalization()(x)
         x = LeakyReLU(self.leaky_slope)(x)
-        x = BatchNormalization()(x)
         x = MaxPooling2D()(x)
         return x
     
-    def decoder_layer(self, inp, filt, kern_s=(1,2,2), stride_s=(1,2,2), kern_t=(3,1,1), pad='same'):
-        '''
-        x = TimeDistributed(Conv2DTranspose(filt, kern, padding=pad, strides=2, activation=LeakyReLU(self.leaky_slope)))(inp)
-        x = TimeDistributed(SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=self.regular))(x)
-        x = TimeDistributed(InstanceNormalization())(x)
-        x = TimeDistributed(LeakyReLU(self.leaky_slope))(x)
-        x = TimeDistributed(BatchNormalization())(x)
+    def recurrent_layer(self, inp, units, kern=3, pad='same'):
+        x = tf.expand_dims(inp, 1)
+        x = tf.tile(x, (1, self.y_train.shape[1], 1, 1, 1))
+        x = ConvLSTM2D(units,   kern, padding=pad, return_sequences=True)(x)
+        x = ConvLSTM2D(units*2, kern, padding=pad, return_sequences=True)(x)
+        x = ConvLSTM2D(units,   kern, padding=pad, return_sequences=True)(x)
         return x
-        ____
-        Another version:
-        x = ConvLSTM2D(filt, kern, padding=pad, return_sequences=True, activation=self.activ)(inp)
+
+    def decoder_layer(self, inp, filt, kern=3, pad='same'):
+        x = TimeDistributed(Conv2DTranspose(filt, kern, padding='same', strides=2))(inp)
+        x = TimeDistributed(Conv2D(filt//2, kern, padding='same'))(x)
+        xf = tf.math.real(tf.signal.fft2d(tf.cast(x, tf.complex64)))
+        x = LayerNormalization()(x+xf)
+        x = TimeDistributed(Conv2D(filt//2, kern, padding='same'))(x)
         x = InstanceNormalization()(x)
-        x = TimeDistributed(Conv2DTranspose(filt, kern, padding=pad, strides=2, kernel_regularizer=self.regular))(x)
-        x = LeakyReLU(leaky_slope)(x)
-        x = BatchNormalization()(x)
-        return x
-        '''
-        x = Conv3DTranspose(filt, kern_s, strides=stride_s, padding=pad, kernel_regularizer=self.regular)(inp)
-        x = Conv3DTranspose(filt, kern_t, padding=pad, kernel_regularizer=self.regular)(x)
-        #x = InstanceNormalization()(x)
         x = LeakyReLU(self.leaky_slope)(x)
-        x = BatchNormalization()(x)
-        return x 
-    
-    def recurrent_layer(self, inp, hidden_units, drop=0.1):
-        height, width, channels = inp.shape[1:]
-        x = tf.expand_dims(inp, -1)
-        x = tf.tile(x, (1, 1, 1, 1, hidden_units))
-        x = Reshape((np.prod(inp.shape[1:]), hidden_units))(x)
-        x = LSTM(self.timesteps, return_sequences=True, dropout=drop)(x)
-        x = LSTM(self.timesteps, return_sequences=True, dropout=drop)(x)
-        x = tf.transpose(x, [0,2,1])
-        x = Reshape((self.timesteps, height, width, channels))(x)
         return x
     
-    def out_layer(self, inp, kern=(3,3), pad='same', act='sigmoid'):
+    def out_layer(self, inp, kern=3, pad='same', act='sigmoid'):
         x = TimeDistributed(Conv2D(self.y_channels, kern, padding=pad))(inp)
-        x = InstanceNormalization()(x)
+        #x = InstanceNormalization()(x)
         x = TimeDistributed(BatchNormalization())(x)
         x = TimeDistributed(Activation(act))(x)
         return x
@@ -186,21 +173,19 @@ class SpatiotemporalCO2:
         _ = self.encoder_layer(inputs, 16)
         _ = self.encoder_layer(_,   64)
         z = self.encoder_layer(_,   128)
-        # Recurrence
+        # Recurrent
         z_inp = Input(z.shape[1:])
-        zt = self.recurrent_layer(z_inp, 30)
+        zt = self.recurrent_layer(z_inp, 128)
         # Decoder
-        zt_inp = Input(zt.shape[1:])
-        _ = self.decoder_layer(zt_inp, 128)
+        _ = self.decoder_layer(zt, 128)
         _ = self.decoder_layer(_, 64)
         _ = self.decoder_layer(_, 16)
         # Output
         out = self.out_layer(_)
         # Models
-        self.encoder = Model(inputs, z,   name='Encoder')
-        self.dynamic = Model(z_inp,  zt,  name='Dynamic')
-        self.decoder = Model(zt_inp, out, name='Decoder')
-        outputs = self.decoder(self.dynamic(self.encoder(inputs)))
+        self.encoder = Model(inputs, z,  name='Encoder')
+        self.decoder = Model(z_inp, out, name='Decoder')
+        outputs = self.decoder(self.encoder(inputs))
         self.model   = Model(inputs, outputs, name='CNN-RNN-Proxy')
         return self.model
 
@@ -232,3 +217,97 @@ class SpatiotemporalCO2:
         print('Training Time: {:.2f} minutes'.format(train_time/60))
         self.plot_loss(fit)
         return model, fit
+
+
+###################################################################################################
+def plot_results(realization, X, ytrue, ypred, ts, cmap='jet', figsize=(20,4)):
+    titles = ['Poro','LogPerm','Facies','Wells']
+    plt.figure(figsize=(20,2))
+    for i in range(4):
+        plt.subplot(1,4,i+1)
+        plt.imshow(X[realization,:,:,i], cmap=cmap)
+        plt.xticks([]); plt.yticks([]); plt.title(titles[i], weight='bold')
+    plt.show()
+
+    fig, axs = plt.subplots(2, 11, figsize=(20,4))
+    for j in range(11):
+        axs[0,j].imshow(ytrue[realization,j,:,:,0], cmap=cmap)
+        axs[1,j].imshow(ypred[realization,j,:,:,0], cmap=cmap)
+        axs[0,j].set(title='t={}'.format(ts[j]))
+        for i in range(2):
+            axs[i,j].set(xticks=[], yticks=[])
+    axs[0,0].set_ylabel('True', weight='bold'); axs[1,0].set_ylabel('Pred', weight='bold')
+    plt.show()
+
+    fig, axs = plt.subplots(2, 11, figsize=(20,4))
+    for j in range(11):
+        axs[0,j].imshow(ytrue[realization,j,:,:,1], cmap=cmap)
+        axs[1,j].imshow(ypred[realization,j,:,:,1], cmap=cmap)
+        axs[0,j].set(title='t={}'.format(ts[j]))
+        for i in range(2):
+            axs[i,j].set(xticks=[], yticks=[])
+    axs[0,0].set_ylabel('True', weight='bold'); axs[1,0].set_ylabel('Pred', weight='bold')
+    plt.show()
+###################################################################################################
+'''
+    def encoder_layer(self, inp, filt, kern=2, pad='same'):
+        x = SeparableConv2D(filt, kern, padding=pad, activation=LeakyReLU(self.leaky_slope))(inp)
+        x = SeparableConv2D(filt, kern, padding=pad, kernel_regularizer=self.regular)(x)
+        #x = InstanceNormalization()(x)
+        x = LeakyReLU(self.leaky_slope)(x)
+        x = BatchNormalization()(x)
+        x = MaxPooling2D()(x)
+        return x
+    
+    def decoder_layer(self, inp, filt, kern_s=(1,2,2), stride_s=(1,2,2), kern_t=(3,1,1), pad='same'):
+        x = Conv3DTranspose(filt, kern_s, strides=stride_s, padding=pad, kernel_regularizer=self.regular)(inp)
+        x = Conv3DTranspose(filt, kern_t, padding=pad, kernel_regularizer=self.regular)(x)
+        #x = InstanceNormalization()(x)
+        x = LeakyReLU(self.leaky_slope)(x)
+        x = BatchNormalization()(x)
+        return x 
+    
+    def recurrent_layer(self, inp, hidden_units, drop=0.1):
+        height, width, channels = inp.shape[1:]
+        time_steps = self.y_train.shape[1]
+        x = tf.expand_dims(inp, -1)
+        x = tf.tile(x, (1, 1, 1, 1, hidden_units))
+        x = Reshape((np.prod(inp.shape[1:]), hidden_units))(x)
+        x = LSTM(time_steps, return_sequences=True, dropout=drop)(x)
+        x = LSTM(time_steps, return_sequences=True, dropout=drop)(x)
+        x = tf.transpose(x, [0,2,1])
+        x = Reshape((time_steps, height, width, channels))(x)
+        return x
+    
+    def out_layer(self, inp, kern=(3,3), pad='same', act='sigmoid'):
+        x = TimeDistributed(Conv2D(self.y_channels, kern, padding=pad))(inp)
+        x = InstanceNormalization()(x)
+        x = TimeDistributed(BatchNormalization())(x)
+        x = TimeDistributed(Activation(act))(x)
+        return x
+       
+    def make_model(self):
+        inputs = Input(shape=(self.dim, self.dim, self.x_channels))
+        # Encoder
+        _ = self.encoder_layer(inputs, 16)
+        _ = self.encoder_layer(_,   64)
+        z = self.encoder_layer(_,   128)
+        # Recurrence
+        z_inp = Input(z.shape[1:])
+        zt = self.recurrent_layer(z_inp, 11)
+        # Decoder
+        zt_inp = Input(zt.shape[1:])
+        _ = self.decoder_layer(zt_inp, 128)
+        _ = self.decoder_layer(_, 64)
+        _ = self.decoder_layer(_, 16)
+        # Output
+        out = self.out_layer(_)
+        # Models
+        self.encoder = Model(inputs, z,   name='Encoder')
+        self.dynamic = Model(z_inp,  zt,  name='Dynamic')
+        self.decoder = Model(zt_inp, out, name='Decoder')
+        outputs = self.decoder(self.dynamic(self.encoder(inputs)))
+        self.model   = Model(inputs, outputs, name='CNN-RNN-Proxy')
+        return self.model
+
+'''
