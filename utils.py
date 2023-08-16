@@ -20,7 +20,7 @@ from tensorflow.python.client import device_lib
 from tensorflow_addons.layers import *
 from tensorflow_addons.optimizers import AdamW
 from tensorflow.image import ssim as SSIM
-from tensorflow.image import ssim_multiscale as MSSIM
+from tensorflow.keras.metrics import mean_squared_error as MSE
 from tensorflow.keras.callbacks import LearningRateScheduler, ReduceLROnPlateau
 
 def check_tensorflow_gpu():
@@ -83,7 +83,7 @@ class SpatiotemporalCO2:
         self.t_samples   = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60]
 
         #SGD(learning_rate=1e-3) #Nadam(learning_rate=1e-3)
-        self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-4) 
+        self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-5) 
         self.criterion   = self.custom_loss
         self.L1L2_split  = 0.25
         self.loss_alpha  = 0.75
@@ -92,7 +92,7 @@ class SpatiotemporalCO2:
 
         self.num_epochs  = 100
         self.batch_size  = 30
-        self.lr_decay    = 10
+        self.lr_decay    = 15
         self.verbose     = 0
 
     def load_data(self):
@@ -124,7 +124,7 @@ class SpatiotemporalCO2:
         print('Train - X: {} | y: {}'.format(self.X_train.shape, self.y_train.shape))
         print('Test  - X: {} | y: {}'.format(self.X_test.shape, self.y_test.shape))
 
-    def plot_loss(self, fit, figsize=(4,3)):
+    def plot_loss(self, fit, figsize=(5,3)):
         ep = len(fit.history['loss'])
         it = np.arange(ep)
         plt.figure(figsize=figsize)
@@ -153,7 +153,7 @@ class SpatiotemporalCO2:
     def encoder_layer(self, inp, filt, kern=3, pad='same'):
         _ = SeparableConv2D(filt, kern, padding=pad, activity_regularizer=self.regular)(inp)
         _ = SqueezeExcite()(_)
-        _ = LayerNormalization()(_)
+        _ = InstanceNormalization()(_)
         _ = PReLU()(_)
         _ = MaxPooling2D()(_)
         return _
@@ -189,7 +189,6 @@ class SpatiotemporalCO2:
         return _
     
     def make_model(self):
-        K.clear_session()
         inp = Input(self.X_train.shape[1:])
         z1 = self.encoder_layer(inp,16)
         z2 = self.encoder_layer(z1, 64)
@@ -209,8 +208,8 @@ class SpatiotemporalCO2:
         self.model = Model(inp, t10, name='CNN_RNN_Proxy')
         return self.model, self.encoder
 
-    def train(self, model):
-        model.compile(optimizer=self.optimizer, loss=self.criterion, metrics=['mse'])
+    def training(self):
+        self.model.compile(optimizer=self.optimizer, loss=self.criterion, metrics=['mse'])
         loss_cb     = self.LossCallback()
         lr_reduce   = ReduceLROnPlateau(patience=self.lr_decay) 
         if self.verbose==0:
@@ -226,31 +225,61 @@ class SpatiotemporalCO2:
         n_params = self.model.count_params()
         print('# Parameters: {:,} | Batch size: {} '.format(n_params, self.batch_size))
         start = time()
-        fit = model.fit(self.X_train, self.y_train,
-                        epochs           = self.num_epochs,
-                        batch_size       = self.batch_size,
-                        validation_split = 0.20,
-                        shuffle          = True,
-                        callbacks        = cb,
-                        verbose          = self.verbose)
+        self.fit = self.model.fit(self.X_train, self.y_train,
+                                    epochs           = self.num_epochs,
+                                    batch_size       = self.batch_size,
+                                    validation_split = 0.20,
+                                    shuffle          = True,
+                                    callbacks        = cb,
+                                    verbose          = self.verbose)
         train_time = time()-start
         print('Training Time: {:.2f} minutes'.format(train_time/60))
-        self.plot_loss(fit)
-        return model, fit
+        self.plot_loss(self.fit)
+        return self.model, self.fit
+
+    def compute_mean_ssim(self, true, pred):
+        mean_ssim = {}
+        for i in range(true.shape[1]):
+            mean_ssim[i] = SSIM(true[:,i], pred[:,i], max_val=1.0)
+        return np.array(list(mean_ssim.values())).mean(0).mean()
     
-    def plot_single_results(self, realization, predictions, cmaps=['jet','jet','viridis','binary'], figsize=(20,4)):
+    def compute_mean_mse(self, true, pred):
+        mean_mse = {}
+        for i in range(true.shape[1]):
+            mean_mse[i] = MSE(true[:,i], pred[:,i])
+        return np.array(list(mean_mse.values())).mean(0).mean()
+    
+    def predictions(self):
+        self.y_train_pred = self.model.predict(self.X_train).astype('float64')
+        self.y_test_pred  = self.model.predict(self.X_test).astype('float64')
+        print('Train pred: {} | Test pred: {}'.format(self.y_train_pred.shape, self.y_test_pred.shape))
+        train_mse  = self.compute_mean_mse(self.y_train,  self.y_train_pred)
+        train_ssim = self.compute_mean_ssim(self.y_train, self.y_train_pred)
+        test_mse   = self.compute_mean_mse(self.y_test,   self.y_test_pred)
+        test_ssim  = self.compute_mean_ssim(self.y_test,  self.y_test_pred)
+        print('MSE  | Train: {:.2e}, Test: {:.2e}'.format(train_mse, test_mse))
+        print('SSIM | Train: {:.2f}, Test: {:.2f}'.format(train_ssim*100, test_ssim*100))
+        return self.y_train_pred, self.y_test_pred
+    
+    def plot_single_results(self, realization, train_or_test='train', cmaps=['jet','jet','viridis','binary'], figsize=(20,4)):
         titles = ['Poro','LogPerm','Facies','Wells']
+        if train_or_test == 'train':
+            x, y, yhat = self.X_train, self.y_train, self.y_train_pred
+        elif train_or_test == 'test':
+            x, y, yhat = self.X_test, self.y_test, self.y_test_pred
+        else:
+            print('Please select "train" or "test" to display')
         plt.figure(figsize=(figsize[0],figsize[1]//2))
         for i in range(4):
             plt.subplot(1,4,i+1)
-            plt.imshow(self.X_train[realization,:,:,i], cmap=cmaps[i])
+            plt.imshow(x[realization,:,:,i], cmap=cmaps[i])
             plt.xticks([]); plt.yticks([]); plt.title(titles[i], weight='bold')
         plt.show()
         # Pressure results
         fig, axs = plt.subplots(2, 11, figsize=figsize)
         for j in range(11):
-            axs[0,j].imshow(self.y_train[realization,j,:,:,0], cmap=cmaps[0])
-            axs[1,j].imshow(predictions[realization,j,:,:,0], cmap=cmaps[0])
+            axs[0,j].imshow(y[realization,j,:,:,0], cmap=cmaps[0])
+            axs[1,j].imshow(yhat[realization,j,:,:,0], cmap=cmaps[0])
             axs[0,j].set_title('t={}'.format(self.t_samples[j]), weight='bold')
             for i in range(2):
                 axs[i,j].set(xticks=[], yticks=[])
@@ -258,8 +287,8 @@ class SpatiotemporalCO2:
         # Saturation results
         fig, axs = plt.subplots(2, 11, figsize=figsize)
         for j in range(11):
-            axs[0,j].imshow(self.y_train[realization,j,:,:,1], cmap=cmaps[0])
-            axs[1,j].imshow(predictions[realization,j,:,:,1], cmap=cmaps[0])
+            axs[0,j].imshow(y[realization,j,:,:,1], cmap=cmaps[0])
+            axs[1,j].imshow(yhat[realization,j,:,:,1], cmap=cmaps[0])
             axs[0,j].set_title('t={}'.format(self.t_samples[j]), weight='bold')
             for i in range(2):
                 axs[i,j].set(xticks=[], yticks=[])
