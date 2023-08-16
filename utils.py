@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from time import time
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 
 from scipy.io import loadmat, savemat
 from sklearn.preprocessing import MinMaxScaler
@@ -73,6 +74,9 @@ class SpatiotemporalCO2:
         K.clear_session()
         self.input_features_dir = 'simulations2D/input_features'
         self.output_targets_dir = 'simulations2D/output_targets'
+        self.x_data_labels = ['Poro','LogPerm','Facies','Wells']
+        self.y_data_labels = ['Pressure', 'Saturation']
+        self.return_data = False
 
         self.n_realizations = 1000
         self.x_channels  = 4
@@ -206,7 +210,8 @@ class SpatiotemporalCO2:
         t9  = self.recurrent_decoder(z3, [z2,z1], previous_timestep=t8)
         t10 = self.recurrent_decoder(z3, [z2,z1], previous_timestep=t9)
         self.model = Model(inp, t10, name='CNN_RNN_Proxy')
-        return self.model, self.encoder
+        if self.return_data:
+            return self.model, self.encoder
 
     def training(self):
         self.model.compile(optimizer=self.optimizer, loss=self.criterion, metrics=['mse'])
@@ -235,7 +240,8 @@ class SpatiotemporalCO2:
         train_time = time()-start
         print('Training Time: {:.2f} minutes'.format(train_time/60))
         self.plot_loss(self.fit)
-        return self.model, self.fit
+        if self.return_data:
+            return self.model, self.fit
 
     def compute_mean_ssim(self, true, pred):
         mean_ssim = {}
@@ -259,40 +265,82 @@ class SpatiotemporalCO2:
         test_ssim  = self.compute_mean_ssim(self.y_test,  self.y_test_pred)
         print('MSE  | Train: {:.2e}, Test: {:.2e}'.format(train_mse, test_mse))
         print('SSIM | Train: {:.2f}, Test: {:.2f}'.format(train_ssim*100, test_ssim*100))
-        return self.y_train_pred, self.y_test_pred
+        if self.return_data:
+            return self.y_train_pred, self.y_test_pred
     
-    def plot_single_results(self, realization, train_or_test='train', cmaps=['jet','jet','viridis','binary'], figsize=(20,4)):
-        titles = ['Poro','LogPerm','Facies','Wells']
+    def plot_single_results(self, realization, train_or_test='train', cmaps=['jet','jet','viridis','binary','seismic'], figsize=(20,4)):
+        labels = ['True', 'Predicted', 'Abs. Error']
         if train_or_test == 'train':
             x, y, yhat = self.X_train, self.y_train, self.y_train_pred
         elif train_or_test == 'test':
             x, y, yhat = self.X_test, self.y_test, self.y_test_pred
         else:
             print('Please select "train" or "test" to display')
-        plt.figure(figsize=(figsize[0],figsize[1]//2))
+        # Geologic model (static inputs)
+        plt.figure(figsize=figsize)
         for i in range(4):
             plt.subplot(1,4,i+1)
             plt.imshow(x[realization,:,:,i], cmap=cmaps[i])
-            plt.xticks([]); plt.yticks([]); plt.title(titles[i], weight='bold')
-        plt.show()
+            plt.xticks([]); plt.yticks([]); plt.title(self.x_data_labels[i], weight='bold')
+        plt.suptitle('Geologic Models (static inputs) - R{}'.format(realization), weight='bold'); plt.show()
         # Pressure results
-        fig, axs = plt.subplots(2, 11, figsize=figsize)
-        for j in range(11):
-            axs[0,j].imshow(y[realization,j,:,:,0], cmap=cmaps[0])
-            axs[1,j].imshow(yhat[realization,j,:,:,0], cmap=cmaps[0])
+        fig, axs = plt.subplots(3, len(self.t_samples), figsize=figsize)
+        for j in range(len(self.t_samples)):
+            true, pred = y[realization,j,:,:,0], yhat[realization,j,:,:,0]
+            axs[0,j].imshow(true, cmap=cmaps[0])
+            axs[1,j].imshow(pred, cmap=cmaps[0])
+            axs[2,j].imshow(np.abs(true-pred), cmap=cmaps[-1])
             axs[0,j].set_title('t={}'.format(self.t_samples[j]), weight='bold')
-            for i in range(2):
+            for i in range(3):
                 axs[i,j].set(xticks=[], yticks=[])
-        axs[0,0].set_ylabel('True', weight='bold'); axs[1,0].set_ylabel('Pred', weight='bold'); plt.show()
+                axs[i,0].set_ylabel(labels[i], weight='bold')
+        fig.suptitle('Pressure Results - R{} - {}'.format(realization, train_or_test), weight='bold'); plt.show()
         # Saturation results
-        fig, axs = plt.subplots(2, 11, figsize=figsize)
-        for j in range(11):
-            axs[0,j].imshow(y[realization,j,:,:,1], cmap=cmaps[0])
-            axs[1,j].imshow(yhat[realization,j,:,:,1], cmap=cmaps[0])
+        fig, axs = plt.subplots(3, len(self.t_samples), figsize=figsize)
+        for j in range(len(self.t_samples)):
+            true, pred = y[realization,j,:,:,1], yhat[realization,j,:,:,1]
+            axs[0,j].imshow(true, cmap=cmaps[0])
+            axs[1,j].imshow(pred, cmap=cmaps[0])
+            axs[2,j].imshow(np.abs(true-pred), cmap=cmaps[-1])
             axs[0,j].set_title('t={}'.format(self.t_samples[j]), weight='bold')
-            for i in range(2):
+            for i in range(3):
                 axs[i,j].set(xticks=[], yticks=[])
-        axs[0,0].set_ylabel('True', weight='bold'); axs[1,0].set_ylabel('Pred', weight='bold'); plt.show()
+                axs[i,0].set_ylabel(labels[i], weight='bold')
+        fig.suptitle('Saturation Results - R{} - {}'.format(realization, train_or_test), weight='bold'); plt.show()
+        return None
+
+    def cumulative_co2(self, threshold=0.02, figsize=(12,6)):
+        def compare_cumulative_co2(true, pred, thresh=threshold):
+            true_co2, pred_co2 = {}, {}
+            for i in range(true.shape[0]):
+                true_co2[i] = true[i][np.where(true[i]>thresh)].sum()
+                pred_co2[i] = pred[i][np.where(pred[i]>thresh)].sum()
+            true_co2 = np.array(list(true_co2.values()))
+            pred_co2 = np.array(list(pred_co2.values()))
+            return true_co2, pred_co2
+        true_co2_train, pred_co2_train = compare_cumulative_co2(self.y_train, self.y_train_pred)
+        true_co2_test,  pred_co2_test  = compare_cumulative_co2(self.y_test,  self.y_test_pred) 
+        mean_train_true, mean_train_pred = true_co2_train.mean(), pred_co2_train.mean()
+        mean_test_true,  mean_test_pred  = true_co2_test.mean(),  pred_co2_test.mean()
+        print('Train - Mean CO2 Injected: True: {:.2f} | Pred: {:.2f}'.format(mean_train_true, mean_train_pred))
+        print('Test  - Mean CO2 Injected: True: {:.2f} | Pred: {:.2f}'.format(mean_test_true,  mean_test_pred))
+        fig = plt.figure(figsize=figsize)
+        fig.suptitle('True vs. Predicted Cumulative CO$_2$ Injected', weight='bold')
+        gs = GridSpec(2,2, hspace=0.25)
+        ax1, ax2, ax3 = fig.add_subplot(gs[0,:]), fig.add_subplot(gs[1,0]), fig.add_subplot(gs[1,1])
+        ax1.axline([1000,1000],[10000,10000], c='r', linestyle='-', linewidth=3)
+        ax1.scatter(true_co2_train, pred_co2_train, alpha=0.7, label='train')
+        ax1.scatter(true_co2_test,  pred_co2_test,  alpha=0.7, label='test')
+        ax1.set_xlabel('True', weight='bold'); ax1.set_ylabel('Predicted', weight='bold')
+        ax1.legend(); ax1.grid('on'); 
+        ax2.hist(true_co2_train, edgecolor='gray', label='true')
+        ax2.hist(pred_co2_train, edgecolor='gray', alpha=0.75, label='pred')
+        ax2.set_xlabel('Train', weight='bold'); ax2.legend()
+        ax3.hist(true_co2_test, edgecolor='gray', label='true')
+        ax3.hist(pred_co2_test, edgecolor='gray', alpha=0.75, label='pred')
+        ax3.set_xlabel('Test', weight='bold'); ax3.legend()
+        plt.show()
+        return None
 
 ###################################################################################################
 ############################################### END ###############################################
