@@ -36,6 +36,19 @@ def check_tensorflow_gpu():
     #print(tf.config.list_physical_devices())
     return None
 
+class SpectralProduct(Layer):
+    def __init__(self, **kwargs):
+        super(SpectralProduct, self).__init__(**kwargs)
+    def call(self, inputs):
+        x0 = tf.transpose(inputs, [0,3,1,2])
+        xf = tf.signal.rfft2d(x0)
+        xr = tf.einsum('ijkl, ijpq -> ijpq', x0, tf.math.real(xf))
+        xi = tf.einsum('ijkl, ijpq -> ijpq', x0, tf.math.imag(xf))
+        xc = tf.complex(xr, xi)
+        x  = tf.signal.irfft2d(xc)
+        x  = tf.transpose(x, [0,2,3,1])
+        return x
+
 class SpatiotemporalCO2:
     def __init__(self):
         K.clear_session()
@@ -133,14 +146,21 @@ class SpatiotemporalCO2:
         return lr
 
     def encoder_layer(self, inp, filt, kern=3, pad='same'):
-        x = SeparableConv2D(filt, kern, padding=pad)(inp)
-        xf = tf.math.real(tf.signal.fft2d(tf.cast(x, tf.complex64)))
-        x = LayerNormalization()(x+xf)
-        x = Conv2D(filt, kern, padding='same')(x)
-        x = InstanceNormalization()(x)
-        x = LeakyReLU(self.leaky_slope)(x)
-        x = MaxPooling2D()(x)
-        return x
+        def spectral(inputs):   
+            x0 = tf.transpose(inputs, [0,3,1,2])
+            x = tf.signal.rfft2d(x0)
+            xr = tf.einsum('abcd, abef -> abef', x0, tf.math.real(x))
+            xi = tf.einsum('abcd, abef -> abef', x0, tf.math.imag(x))
+            x = tf.complex(xr, xi)
+            x = tf.signal.irfft2d(x)
+            x = tf.transpose(x, [0,2,3,1])
+            return x
+        _ = spectral(inp)
+        _ = SeparableConv2D(filt, kern, padding=pad)(_)
+        _ = BatchNormalization()(_)
+        _ = LeakyReLU(self.leaky_slope)(_)
+        _ = MaxPooling2D()(_)
+        return _
     
     def recurrent_layer(self, inp, units, kern=3, pad='same'):
         x = tf.expand_dims(inp, 1)
