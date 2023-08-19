@@ -3,6 +3,7 @@ import pandas as pd
 from time import time
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+from matplotlib.animation import FuncAnimation
 
 from scipy.io import loadmat, savemat
 from sklearn.preprocessing import MinMaxScaler
@@ -94,7 +95,7 @@ class SpatiotemporalCO2:
         self.regular     = regularizers.l1(1e-5)
         self.leaky_slope = 0.25
 
-        self.num_epochs  = 100
+        self.num_epochs  = 200
         self.batch_size  = 30
         self.lr_decay    = 15
         self.verbose     = 0
@@ -197,6 +198,8 @@ class SpatiotemporalCO2:
         z1 = self.encoder_layer(inp,16)
         z2 = self.encoder_layer(z1, 64)
         z3 = self.encoder_layer(z2, 128)
+        self.latent1 = Model(inp, z1, name='enc_layer_1')
+        self.latent2 = Model(inp, z2, name='enc_layer_2')
         self.encoder = Model(inp, z3, name='encoder')
         t0  = self.recurrent_decoder(z3, [z2,z1])
         t1  = self.recurrent_decoder(z3, [z2,z1], previous_timestep=t0)
@@ -268,7 +271,7 @@ class SpatiotemporalCO2:
         if self.return_data:
             return self.y_train_pred, self.y_test_pred
     
-    def plot_single_results(self, realization, train_or_test='train', cmaps=['jet','jet','viridis','binary','seismic'], figsize=(20,4)):
+    def plot_single_results(self, realization, train_or_test='train', cmaps=['jet','jet','viridis','binary','binary'], figsize=(20,4)):
         labels = ['True', 'Predicted', 'Abs. Error']
         if train_or_test == 'train':
             x, y, yhat = self.X_train, self.y_train, self.y_train_pred
@@ -339,6 +342,71 @@ class SpatiotemporalCO2:
         ax3.hist(true_co2_test, edgecolor='gray', label='true')
         ax3.hist(pred_co2_test, edgecolor='gray', alpha=0.75, label='pred')
         ax3.set_xlabel('Test', weight='bold'); ax3.legend()
+        plt.show()
+        return None
+        
+    def latent_space(self, train_or_test='train', plot=True, 
+                        nrows=4, ncols=5, imult=200, jmult=30, alpha=0.65,
+                        well_color='red', well_marker='$\swarrow$',
+                        cmaps=['afmhot_r', 'gray', 'jet', 'jet'], figsize=(10,5)):
+        if train_or_test == 'train':
+            data = self.X_train
+        elif train_or_test == 'test':
+            data = self.X_test
+        else:
+            print('Please select "train" or "test" to display')
+        self.z = self.encoder.predict(data)
+        z_mean = self.z.mean(-1)
+        print('Latent shape: {}'.format(self.z.shape))
+        if self.return_data:
+            return self.z
+        titles = [r'Poro $\otimes$ $\overline{FM}$', r'Facies $\otimes$ $\overline{FM}$']
+        if plot == True:
+            fig, axs = plt.subplots(nrows, ncols+2, figsize=figsize)
+            for i in range(nrows):
+                for j in range(ncols):
+                    p, q = i*imult, j*jmult
+                    poro, facies = data[p,:,:,0], data[p,:,:,2]
+                    w = data[p,:,:,-1]; wlocs = np.argwhere(w!=0)
+                    axs[i,j].imshow(self.z[p,:,:,q], cmap=cmaps[0])
+                    axs[i,j].set(xticks=[], yticks=[])
+                    axs[i,0].set_ylabel('R {}'.format(p)); axs[0,j].set_title('FM {}'.format(q))
+                im1 = axs[i,ncols].imshow(poro, cmap=cmaps[2])
+                axs[i,ncols].imshow(z_mean[i], cmap=cmaps[1], alpha=alpha, extent=im1.get_extent())
+                axs[i,ncols].scatter(wlocs[:,1], wlocs[:,0], c=well_color, marker=well_marker)
+                axs[0,ncols].set(title=titles[0]); axs[i,ncols].set(xticks=[], yticks=[])               
+                im2 = axs[i,ncols+1].imshow(facies, cmap=cmaps[3])
+                axs[i,ncols+1].imshow(z_mean[i], cmap=cmaps[1], alpha=alpha, extent=im2.get_extent())
+                axs[i,ncols+1].scatter(wlocs[:,1], wlocs[:,0], c=well_color, marker=well_marker)
+                axs[0,ncols+1].set(title=titles[1]); axs[i,ncols+1].set(xticks=[], yticks=[])
+            plt.show()
+
+    def feature_map_animation(self, nrows=4, ncols=8, imult=200, jmult=1, figsize=(15,5), cmap='jet',
+                                blit=False, interval=750):
+        z1 = self.latent1.predict(self.X_train)
+        z2 = self.latent2.predict(self.X_train)
+        z3 = self.encoder.predict(self.X_train)
+        z = {0:z1, 1:z2, 2:z3}
+        print('z1: {} | z2: {} | z3: {}'.format(z1.shape, z2.shape, z3.shape))
+        fig, axs = plt.subplots(nrows, ncols, figsize=figsize)
+        for i in range(nrows):
+            for j in range(ncols):
+                p, q = i*imult, j*jmult
+                axs[i,j].imshow(z[0][p,:,:,q], cmap=cmap)
+                axs[i,j].set(xticks=[], yticks=[])
+                axs[0,j].set(title='FM {}'.format(q))
+            axs[i,0].set_ylabel('R {}'.format(p))
+        def animate(k):
+            for i in range(nrows):
+                for j in range(ncols):
+                    p, q = i*imult, j*jmult
+                    axs[i,j].imshow(z[k][p,:,:,q], cmap=cmap)
+                    axs[i,j].set(xticks=[], yticks=[])
+                    axs[0,j].set(title='FM {}'.format(q))
+                axs[i,0].set_ylabel('R {}'.format(p))
+            return axs
+        ani = FuncAnimation(fig, animate, frames=len(z), blit=blit, interval=interval)
+        ani.save('figures/feature_maps_animation.gif')
         plt.show()
         return None
 
