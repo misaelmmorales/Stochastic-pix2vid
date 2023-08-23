@@ -86,6 +86,9 @@ class SpatiotemporalCO2:
         self.dim         = 64
         self.test_size   = 0.25
         self.t_samples   = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60]
+        
+        self.cnn_filters = [16,  64, 256]
+        self.rnn_filters = [256, 64, 16]
 
         #SGD(learning_rate=1e-3) #Nadam(learning_rate=1e-3)
         self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-5) 
@@ -129,12 +132,12 @@ class SpatiotemporalCO2:
         print('Train - X: {} | y: {}'.format(self.X_train.shape, self.y_train.shape))
         print('Test  - X: {} | y: {}'.format(self.X_test.shape, self.y_test.shape))
 
-    def plot_loss(self, fit, figsize=(5,3)):
-        ep = len(fit.history['loss'])
+    def plot_loss(self, figsize=(5,3)):
+        ep = len(self.fit.history['loss'])
         it = np.arange(ep)
         plt.figure(figsize=figsize)
-        plt.plot(it, fit.history['loss'], '-', label='loss')
-        plt.plot(it, fit.history['val_loss'], '-', label='validation loss')
+        plt.plot(it, self.fit.history['loss'], '-', label='loss')
+        plt.plot(it, self.fit.history['val_loss'], '-', label='validation loss')
         plt.title('Training: Loss vs. Epochs'); plt.legend()
         plt.xlabel('Epochs'); plt.ylabel('Loss')
         plt.xticks(it[::ep//10]); plt.show()
@@ -163,9 +166,9 @@ class SpatiotemporalCO2:
         _ = MaxPooling2D()(_)
         return _
     
-    def recurrent_decoder(self, z_input, residuals, filters=[64, 16, 4], previous_timestep=None):
-        def recurrent_step(inp, filt, res, kern=3, pad='same'):
-            y = ConvLSTM2D(filt, kern, padding=pad)(inp)
+    def recurrent_decoder(self, z_input, residuals, dropout=0.1, previous_timestep=None):
+        def recurrent_step(inp, filt, res, kern=3, pad='same', drop=dropout):
+            y = ConvLSTM2D(filt, kern, padding=pad, recurrent_dropout=drop)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
             y = UpSampling2D()(y)
@@ -174,8 +177,8 @@ class SpatiotemporalCO2:
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y,1)
             return y
-        def recurrent_last(inp, filt, kern=3, pad='same'):
-            y = ConvLSTM2D(filt, kern, padding=pad)(inp)
+        def recurrent_last(inp, filt, kern=3, pad='same', drop=dropout):
+            y = ConvLSTM2D(filt, kern, padding=pad, recurrent_dropout=drop)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
             y = UpSampling2D()(y)
@@ -184,7 +187,7 @@ class SpatiotemporalCO2:
             y = tf.expand_dims(y, 1)
             return y
         res3, res2 = residuals
-        filt3, filt2, filt1 = filters
+        filt3, filt2, filt1 = self.rnn_filters
         _ = tf.expand_dims(z_input, 1)
         _ = recurrent_step(_, filt3, res3)
         _ = recurrent_step(_, filt2, res2)
@@ -195,9 +198,9 @@ class SpatiotemporalCO2:
     
     def make_model(self):
         inp = Input(self.X_train.shape[1:])
-        z1 = self.encoder_layer(inp,16)
-        z2 = self.encoder_layer(z1, 64)
-        z3 = self.encoder_layer(z2, 128)
+        z1 = self.encoder_layer(inp, self.cnn_filters[0])
+        z2 = self.encoder_layer(z1,  self.cnn_filters[1])
+        z3 = self.encoder_layer(z2,  self.cnn_filters[2])
         self.latent1 = Model(inp, z1, name='enc_layer_1')
         self.latent2 = Model(inp, z2, name='enc_layer_2')
         self.encoder = Model(inp, z3, name='encoder')
