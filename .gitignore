@@ -17,3 +17,4 @@ simulations2D/data/saturation.npy
 simulations2D/data/timestamps.npy
 simulations2D/data/wells.npy
 simulations3D/perm_48x48x8.csv
+cnn_rnn_proxy/variables/variables.data-00000-of-00001

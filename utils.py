@@ -78,6 +78,7 @@ class SpatiotemporalCO2:
         self.x_data_labels = ['Poro','LogPerm','Facies','Wells']
         self.y_data_labels = ['Pressure', 'Saturation']
         self.return_data = False
+        self.save_model  = False
 
         self.n_realizations = 1000
         self.x_channels  = 4
@@ -132,12 +133,12 @@ class SpatiotemporalCO2:
         print('Train - X: {} | y: {}'.format(self.X_train.shape, self.y_train.shape))
         print('Test  - X: {} | y: {}'.format(self.X_test.shape, self.y_test.shape))
 
-    def plot_loss(self, fit, figsize=(5,3)):
-        ep = len(fit.history['loss'])
+    def plot_loss(self, figsize=(5,3)):
+        ep = len(self.fit.history['loss'])
         it = np.arange(ep)
         plt.figure(figsize=figsize)
-        plt.plot(it, fit.history['loss'], '-', label='loss')
-        plt.plot(it, fit.history['val_loss'], '-', label='validation loss')
+        plt.plot(it, self.fit.history['loss'], '-', label='loss')
+        plt.plot(it, self.fit.history['val_loss'], '-', label='validation loss')
         plt.title('Training: Loss vs. Epochs'); plt.legend()
         plt.xlabel('Epochs'); plt.ylabel('Loss')
         plt.xticks(it[::ep//10]); plt.show()
@@ -245,7 +246,9 @@ class SpatiotemporalCO2:
                                     verbose          = self.verbose)
         train_time = time()-start
         print('Training Time: {:.2f} minutes'.format(train_time/60))
-        self.plot_loss(self.fit)
+        self.plot_loss()
+        if self.save_model:
+            self.model.save('cnn_rnn_proxy')
         if self.return_data:
             return self.model, self.fit
 
