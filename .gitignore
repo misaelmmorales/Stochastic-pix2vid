@@ -21,3 +21,5 @@ cnn_rnn_proxy/variables/variables.data-00000-of-00001
 cnn_rnn_proxy/variables/variables.index
 cnn_rnn_proxy/keras_metadata.pb
 cnn_rnn_proxy/saved_model.pb
+old_repo/X_temp.npy
+old_repo/y_temp.npy
