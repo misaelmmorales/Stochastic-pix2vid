@@ -1,15 +1,10 @@
 import numpy as np
-import pandas as pd
 from time import time
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.animation import FuncAnimation
-
-from scipy.io import loadmat, savemat
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
-from skimage.metrics import mean_squared_error as img_mse
-from skimage.metrics import structural_similarity as img_ssim
 
 import keras.backend as K
 from keras import Model, regularizers
@@ -68,10 +63,10 @@ class SpatiotemporalCO2:
         self.y_cmaps       = ['jet', 'jet']
         self.err_cmap      = 'binary'
         self.latent_cmap   = ['afmhot_r', 'gray']
-        self.return_data = False
-        self.save_model  = False
+        self.return_data   = False
+        self.save_model    = False
 
-        self.n_realizations = 1000
+        self.n_samples   = 1000
         self.x_channels  = 4
         self.y_channels  = 2
         self.timesteps   = 60
@@ -81,29 +76,28 @@ class SpatiotemporalCO2:
         
         self.cnn_filters = [16,  64, 256]
         self.rnn_filters = [256, 64, 16]
-        self.conv_groups = 2
-        self.gaus_noise  = 0.1
+        self.conv_groups = 1
         self.rnn_dropout = 0.1
         self.up_interp   = 'nearest'
 
-        self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-6)
+        self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-5)
         self.criterion   = self.custom_loss
-        self.L1L2_split  = 0.25
-        self.ridge_alpha = 0.70
+        self.L1L2_split  = 1/3
+        self.ridge_alpha = 2/3
         self.regular     = regularizers.l1(1e-6)
-        self.leaky_slope = 0.25
+        self.leaky_slope = 0.30
         self.valid_split = 0.20
 
-        self.num_epochs  = 200
+        self.num_epochs  = 100
         self.batch_size  = 60
         self.lr_decay    = 15
         self.verbose     = 0
 
     def load_data(self):
         print('... Loading Full Dataset ...')
-        X_data = np.zeros((self.n_realizations, self.x_channels, self.dim, self.dim))
-        y_data = np.zeros((self.n_realizations, self.timesteps, self.y_channels, self.dim, self.dim))
-        for i in range(self.n_realizations):
+        X_data = np.zeros((self.n_samples, self.x_channels, self.dim, self.dim))
+        y_data = np.zeros((self.n_samples, self.timesteps, self.y_channels, self.dim, self.dim))
+        for i in range(self.n_samples):
             X_data[i] = np.load(self.input_features_dir + '/X_data_{}.npy'.format(i))
             y_data[i] = np.load(self.output_targets_dir + '/y_data_{}.npy'.format(i))
         self.X_data, self.y_data = np.moveaxis(X_data, 1, -1), np.moveaxis(y_data, 2, -1)
@@ -136,7 +130,7 @@ class SpatiotemporalCO2:
         else:
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm, self.y_norm[:,ts], test_size=self.test_size)
         print('Train - X: {} | y: {}'.format(self.X_train.shape, self.y_train.shape))
-        print('Test  - X: {} | y: {}'.format(self.X_test.shape, self.y_test.shape))
+        print('Test  - X: {}  | y: {}'.format(self.X_test.shape, self.y_test.shape))
 
     def custom_loss(self, true, pred):
         ssim_loss = tf.reduce_mean(1.0 - SSIM(true, pred, max_val=1.0))
@@ -156,7 +150,6 @@ class SpatiotemporalCO2:
 
     def encoder_layer(self, inp, filt, kern=3, pad='same'):
         _ = SeparableConv2D(filt, kern, padding=pad, activity_regularizer=self.regular, depth_multiplier=self.conv_groups)(inp)
-        _ = GaussianNoise(self.gaus_noise)(_)
         _ = SqueezeExcite()(_)
         _ = InstanceNormalization()(_)
         _ = PReLU()(_)
@@ -167,29 +160,25 @@ class SpatiotemporalCO2:
     def recurrent_decoder(self, z_input, residuals, previous_timestep=None):
         dropout = self.rnn_dropout
         def recurrent_step(inp, filt, res, kern=3, pad='same', drop=dropout):
-            y = ConvLSTM2D(filt, kern, padding=pad, dropout=drop)(inp)
-            y = GaussianNoise(self.gaus_noise)(y)
+            y = ConvLSTM2D(filt, kern, padding=pad, recurrent_dropout=drop)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
             y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
             y = Concatenate()([y, res])
             # spatial
             y = Conv2D(filt, kern, padding=pad, groups=self.conv_groups)(y)
-            y = SpatialDropout2D(self.rnn_dropout)(y)
-            y = GaussianNoise(self.gaus_noise)(y)
+            y = SpatialDropout2D(drop)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y,1)
             return y
         def recurrent_last(inp, filt, kern=3, pad='same', drop=dropout):
-            y = ConvLSTM2D(filt, kern, padding=pad, dropout=drop)(inp)
-            y = GaussianNoise(self.gaus_noise)(y)
+            y = ConvLSTM2D(filt, kern, padding=pad, recurrent_dropout=drop)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
             y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
             # spatial
             y = Conv2D(self.y_channels, kern, padding=pad, groups=self.conv_groups)(y)
-            y = SpatialDropout2D(self.rnn_dropout)(y)
-            y = GaussianNoise(self.gaus_noise)(y)
+            y = SpatialDropout2D(drop)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y, 1)
             return y
