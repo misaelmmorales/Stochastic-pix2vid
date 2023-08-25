@@ -102,7 +102,7 @@ class SpatiotemporalCO2:
         self.leaky_slope = 0.25
 
         self.num_epochs  = 200
-        self.batch_size  = 50
+        self.batch_size  = 60
         self.lr_decay    = 15
         self.verbose     = 0
 
@@ -165,6 +165,28 @@ class SpatiotemporalCO2:
                 axs[i,j].set(xticks=[], yticks=[])
                 axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
                 axs[i,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
+        plt.show()
+    
+    def plot_data(self, nsamples=10, multiplier=1, p_s=1, cmaps=['jet','jet','viridis','binary','jet'], figsize=(12,15)):
+        ts = np.array(self.t_samples); ts[1:]-=1
+        nx, ny = self.x_channels, len(ts)
+        _, axs = plt.subplots(nx+ny, nsamples, figsize=figsize, tight_layout=True)
+        # features
+        for i in range(nx):
+            for j in range(nsamples):
+                axs[i,j].imshow(self.X_norm[j*multiplier, :, :, i], cmap=cmaps[i])
+            axs[i,0].set_ylabel(self.x_data_labels[i], weight='bold')
+        # targets
+        for i in range(ny):
+            for j in range(nsamples):
+                p = i+nx
+                axs[p,j].imshow(self.y_norm[j*multiplier, ts[i], :, :, p_s], cmap=cmaps[-1])
+            axs[p,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
+        # plotting
+        for j in range(nsamples):
+            axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
+            for i in range(nx+ny):
+                axs[i,j].set(xticks=[], yticks=[])
         plt.show()
 
     def plot_loss(self, figsize=(5,3), cs=['tab:blue','tab:orange'], grid=True):
