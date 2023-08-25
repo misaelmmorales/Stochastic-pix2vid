@@ -35,6 +35,20 @@ def check_torch_gpu():
     device = torch.device('cuda' if cuda_avail else 'cpu')
     return device
 
+# Spectral (FNO) layer
+class SpectralProduct(Layer):
+    def __init__(self, **kwargs):
+        super(SpectralProduct, self).__init__(**kwargs)
+    def call(self, inputs):
+        x0 = tf.transpose(inputs, [0,3,1,2])
+        xf = tf.signal.rfft2d(x0)
+        xr = tf.einsum('ijkl, ijpq -> ijpq', x0, tf.math.real(xf))
+        xi = tf.einsum('ijkl, ijpq -> ijpq', x0, tf.math.imag(xf))
+        xc = tf.complex(xr, xi)
+        x  = tf.signal.irfft2d(xc)
+        x  = tf.transpose(x, [0,2,3,1])
+        return x
+
 # Define custom dataset classes for train and test sets
 class CustomDataset(Dataset):
     def __init__(self, filenames):

@@ -36,19 +36,6 @@ def check_tensorflow_gpu():
     print('# GPU available: {} ({})'.format(num_gpu_avail, gpu_name))
     #print(tf.config.list_physical_devices())
     return None
-
-class SpectralProduct(Layer):
-    def __init__(self, **kwargs):
-        super(SpectralProduct, self).__init__(**kwargs)
-    def call(self, inputs):
-        x0 = tf.transpose(inputs, [0,3,1,2])
-        xf = tf.signal.rfft2d(x0)
-        xr = tf.einsum('ijkl, ijpq -> ijpq', x0, tf.math.real(xf))
-        xi = tf.einsum('ijkl, ijpq -> ijpq', x0, tf.math.imag(xf))
-        xc = tf.complex(xr, xi)
-        x  = tf.signal.irfft2d(xc)
-        x  = tf.transpose(x, [0,2,3,1])
-        return x
     
 class SqueezeExcite(Layer):
     def __init__(self, ratio=4, **kwargs):
@@ -75,8 +62,12 @@ class SpatiotemporalCO2:
         K.clear_session()
         self.input_features_dir = 'simulations2D/input_features'
         self.output_targets_dir = 'simulations2D/output_targets'
-        self.x_data_labels = ['Poro','LogPerm','Facies','Wells']
+        self.x_data_labels = ['Poro', 'LogPerm', 'Facies',  'Wells']
         self.y_data_labels = ['Pressure', 'Saturation']
+        self.x_cmaps       = ['jet', 'jet', 'viridis', 'binary']
+        self.y_cmaps       = ['jet', 'jet']
+        self.err_cmap      = 'binary'
+        self.latent_cmap   = ['afmhot_r', 'gray']
         self.return_data = False
         self.save_model  = False
 
@@ -90,16 +81,18 @@ class SpatiotemporalCO2:
         
         self.cnn_filters = [16,  64, 256]
         self.rnn_filters = [256, 64, 16]
-        self.rnn_dropout = 0.2
-        self.up_interp   = 'bilinear'
+        self.conv_groups = 2
+        self.gaus_noise  = 0.1
+        self.rnn_dropout = 0.1
+        self.up_interp   = 'nearest'
 
-        #SGD(learning_rate=1e-3) #Nadam(learning_rate=1e-3)
         self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-6)
         self.criterion   = self.custom_loss
         self.L1L2_split  = 0.25
         self.ridge_alpha = 0.70
         self.regular     = regularizers.l1(1e-6)
         self.leaky_slope = 0.25
+        self.valid_split = 0.20
 
         self.num_epochs  = 200
         self.batch_size  = 60
@@ -107,6 +100,7 @@ class SpatiotemporalCO2:
         self.verbose     = 0
 
     def load_data(self):
+        print('... Loading Full Dataset ...')
         X_data = np.zeros((self.n_realizations, self.x_channels, self.dim, self.dim))
         y_data = np.zeros((self.n_realizations, self.timesteps, self.y_channels, self.dim, self.dim))
         for i in range(self.n_realizations):
@@ -115,91 +109,34 @@ class SpatiotemporalCO2:
         self.X_data, self.y_data = np.moveaxis(X_data, 1, -1), np.moveaxis(y_data, 2, -1)
         print('X: {} | y: {}'.format(self.X_data.shape, self.y_data.shape))
 
-    def process_data(self, n_subsample=None, augment=True, rots=3):
+    def process_data(self, n_subsample=None, augment=True, rotations=3):
         # data augmentation
         if augment==True:
-            xrot = np.rot90(self.X_data, k=rots, axes=(1,2))
-            yrot = np.rot90(self.y_data, k=rots, axes=(2,3))
+            xrot = np.rot90(self.X_data, k=rotations, axes=(1,2))
+            yrot = np.rot90(self.y_data, k=rotations, axes=(2,3))
             x = np.concatenate([self.X_data, xrot], axis=0)
             y = np.concatenate([self.y_data, yrot], axis=0)
-            print('Data Augmentation Done! - n_samples={:,}'.format(x.shape[0]))
+            print('Data Augmentation Done!    - n_samples={:,}'.format(x.shape[0]))
         else:
             x = self.X_data
             y = self.y_data
         # feature processing
         num, height, width, channels = x.shape
-        X_reshaped  = x.reshape(num*height*width, channels)
-        self.X_norm = MinMaxScaler().fit_transform(X_reshaped).reshape(num, height, width, channels)
+        self.X_norm = MinMaxScaler().fit_transform( x.reshape(num*height*width, channels)).reshape(num, height, width, channels)
         # target processing
         num, tsteps, height, width, channels = y.shape
-        y_reshaped  = y.reshape(num*tsteps, -1)
-        self.y_norm = MinMaxScaler().fit_transform(y_reshaped).reshape(num, tsteps, height, width, channels)
+        self.y_norm = MinMaxScaler().fit_transform(y.reshape(num*tsteps, -1)).reshape(num, tsteps, height, width, channels)
         print('MinMax Normalization Done! - [{}, {}]'.format(self.X_norm.min(), self.X_norm.max()))
         # train-test split and subsampling
         ts = np.array(self.t_samples); ts[1:]-=1
         if n_subsample != None:
-            print('Subsampling data for {} samples, {} timesteps ...'.format(n_subsample, len(self.t_samples)))
+            print('\n... Subsampling data for {} samples, {} timesteps ...'.format(n_subsample, len(self.t_samples)))
             idx = np.random.choice(range(self.X_norm.shape[0]), n_subsample, replace=False)
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm[idx], self.y_norm[idx][:,ts], test_size=self.test_size)
         else:
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm, self.y_norm[:,ts], test_size=self.test_size)
         print('Train - X: {} | y: {}'.format(self.X_train.shape, self.y_train.shape))
         print('Test  - X: {} | y: {}'.format(self.X_test.shape, self.y_test.shape))
-
-    def plot_features(self, nsamples=10, multiplier=1, figsize=(15,5), cmaps=['jet','jet','viridis','binary']):
-        _, axs = plt.subplots(4, nsamples, figsize=figsize)
-        for i in range(4):
-            for j in range(nsamples):
-                axs[i,j].imshow(self.X_norm[j*multiplier,:,:,i], cmap=cmaps[i])
-                axs[i,j].set(xticks=[], yticks=[])
-                axs[i,0].set_ylabel(self.x_data_labels[i], weight='bold')
-                axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
-        plt.show()
-    
-    def plot_targets(self, p_s=1, nsamples=10, multiplier=1, figsize=(15,10), cmap='jet'):
-        ts = np.array(self.t_samples); ts[1:]-=1
-        _, axs = plt.subplots(len(ts), nsamples, figsize=figsize)
-        for i in range(len(ts)):
-            for j in range(nsamples):
-                axs[i,j].imshow(self.y_norm[j*multiplier, ts[i], :, :, p_s], cmap=cmap)
-                axs[i,j].set(xticks=[], yticks=[])
-                axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
-                axs[i,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
-        plt.show()
-    
-    def plot_data(self, nsamples=10, multiplier=1, p_s=1, cmaps=['jet','jet','viridis','binary','jet'], figsize=(12,15)):
-        ts = np.array(self.t_samples); ts[1:]-=1
-        nx, ny = self.x_channels, len(ts)
-        _, axs = plt.subplots(nx+ny, nsamples, figsize=figsize, tight_layout=True)
-        # features
-        for i in range(nx):
-            for j in range(nsamples):
-                axs[i,j].imshow(self.X_norm[j*multiplier, :, :, i], cmap=cmaps[i])
-            axs[i,0].set_ylabel(self.x_data_labels[i], weight='bold')
-        # targets
-        for i in range(ny):
-            for j in range(nsamples):
-                p = i+nx
-                axs[p,j].imshow(self.y_norm[j*multiplier, ts[i], :, :, p_s], cmap=cmaps[-1])
-            axs[p,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
-        # plotting
-        for j in range(nsamples):
-            axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
-            for i in range(nx+ny):
-                axs[i,j].set(xticks=[], yticks=[])
-        plt.show()
-
-    def plot_loss(self, figsize=(5,3), cs=['tab:blue','tab:orange'], grid=True):
-        ep = len(self.fit.history['loss'])
-        it = np.arange(ep)
-        plt.figure(figsize=figsize)
-        plt.plot(it, self.fit.history['loss'], c=cs[0], linestyle='-', label='loss')
-        plt.plot(it, self.fit.history['val_loss'], c=cs[1], linestyle='-', label='validation loss')
-        plt.title('Training: Loss vs. Epochs'); plt.xlabel('Epochs'); plt.ylabel('Loss')
-        plt.legend(); plt.xticks(it[::ep//10])
-        if grid==True:
-            plt.grid('on')
-        plt.show()
 
     def custom_loss(self, true, pred):
         ssim_loss = tf.reduce_mean(1.0 - SSIM(true, pred, max_val=1.0))
@@ -218,33 +155,41 @@ class SpatiotemporalCO2:
                 print('Epoch: [{}/{}] - Loss: {:.4f} - Val Loss: {:.4f}'.format(epoch+1, SpatiotemporalCO2().num_epochs, logs['loss'], logs['val_loss']))
 
     def encoder_layer(self, inp, filt, kern=3, pad='same'):
-        _ = SeparableConv2D(filt, kern, padding=pad, activity_regularizer=self.regular, depth_multiplier=2)(inp)
+        _ = SeparableConv2D(filt, kern, padding=pad, activity_regularizer=self.regular, depth_multiplier=self.conv_groups)(inp)
+        _ = GaussianNoise(self.gaus_noise)(_)
         _ = SqueezeExcite()(_)
         _ = InstanceNormalization()(_)
         _ = PReLU()(_)
         _ = MaxPooling2D()(_)
+        _ = SpatialDropout2D(self.rnn_dropout)(_)
         return _
     
     def recurrent_decoder(self, z_input, residuals, previous_timestep=None):
         dropout = self.rnn_dropout
         def recurrent_step(inp, filt, res, kern=3, pad='same', drop=dropout):
             y = ConvLSTM2D(filt, kern, padding=pad, dropout=drop)(inp)
+            y = GaussianNoise(self.gaus_noise)(y)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
-            #y = UpSampling2D(interpolation=self.up_interp)(y)
-            y = Conv2DTranspose(filt, kern, strides=2, padding='same', activity_regularizer=self.regular)(y)
+            y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
             y = Concatenate()([y, res])
-            y = Conv2D(filt, kern, padding=pad)(y)
+            # spatial
+            y = Conv2D(filt, kern, padding=pad, groups=self.conv_groups)(y)
+            y = SpatialDropout2D(self.rnn_dropout)(y)
+            y = GaussianNoise(self.gaus_noise)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y,1)
             return y
         def recurrent_last(inp, filt, kern=3, pad='same', drop=dropout):
             y = ConvLSTM2D(filt, kern, padding=pad, dropout=drop)(inp)
+            y = GaussianNoise(self.gaus_noise)(y)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
-            #y = UpSampling2D(interpolation=self.up_interp)(y)
-            #y = Conv2D(self.y_channels, kern, padding=pad, groups=2)(y)
-            y = Conv2DTranspose(self.y_channels, kern, strides=2, padding='same', activity_regularizer=self.regular)(y)
+            y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
+            # spatial
+            y = Conv2D(self.y_channels, kern, padding=pad, groups=self.conv_groups)(y)
+            y = SpatialDropout2D(self.rnn_dropout)(y)
+            y = GaussianNoise(self.gaus_noise)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y, 1)
             return y
@@ -280,12 +225,12 @@ class SpatiotemporalCO2:
         self.encoder = Model(inp, z3, name='encoder');     self.encoder.compile('adam','mse',['mse'])
         self.model   = Model(inp, t10, name='CNN_RNN_Proxy')
         if self.return_data:
-            return self.model, self.encoder
+            return self.model
 
     def training(self):
         self.model.compile(optimizer=self.optimizer, loss=self.criterion, metrics=['mse'])
-        loss_cb     = self.LossCallback()
-        lr_reduce   = ReduceLROnPlateau(patience=self.lr_decay) 
+        loss_cb   = self.LossCallback()
+        lr_reduce = ReduceLROnPlateau(patience=self.lr_decay) 
         if self.verbose==0:
             if self.lr_decay != None:
                 cb = [loss_cb, lr_reduce]
@@ -302,7 +247,7 @@ class SpatiotemporalCO2:
         self.fit = self.model.fit(self.X_train, self.y_train,
                                     epochs           = self.num_epochs,
                                     batch_size       = self.batch_size,
-                                    validation_split = 0.20,
+                                    validation_split = self.valid_split,
                                     shuffle          = True,
                                     callbacks        = cb,
                                     verbose          = self.verbose)
@@ -313,6 +258,18 @@ class SpatiotemporalCO2:
             self.model.save('cnn_rnn_proxy')
         if self.return_data:
             return self.model, self.fit
+
+    def plot_loss(self, figsize=(5,3), cs=['tab:blue','tab:orange'], grid=True, lines=['-','--']):
+        ep = len(self.fit.history['loss'])
+        it = np.arange(ep)
+        plt.figure(figsize=figsize)
+        plt.plot(it, self.fit.history['loss'], c=cs[0], linestyle=lines[0], label='loss')
+        plt.plot(it, self.fit.history['val_loss'], c=cs[1], linestyle=lines[1], label='validation loss')
+        plt.title('Training: Loss vs. Epochs'); plt.xlabel('Epochs'); plt.ylabel('Loss')
+        plt.legend(); plt.xticks(it[::ep//10])
+        if grid==True:
+            plt.grid('on')
+        plt.show()
 
     def compute_mean_ssim(self, true, pred):
         mean_ssim = {}
@@ -339,7 +296,50 @@ class SpatiotemporalCO2:
         if self.return_data:
             return self.y_train_pred, self.y_test_pred
     
-    def plot_single_results(self, realization, train_or_test='train', cmaps=['jet','jet','viridis','binary','binary'], figsize=(20,4)):
+    def plot_features(self, nsamples=10, multiplier=1, figsize=(15,5)):
+        _, axs = plt.subplots(4, nsamples, figsize=figsize)
+        for i in range(4):
+            for j in range(nsamples):
+                axs[i,j].imshow(self.X_norm[j*multiplier,:,:,i], cmap=self.x_cmaps[i])
+                axs[i,j].set(xticks=[], yticks=[])
+                axs[i,0].set_ylabel(self.x_data_labels[i], weight='bold')
+                axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
+        plt.show()
+    
+    def plot_targets(self, p_s=1, nsamples=10, multiplier=1, figsize=(15,10)):
+        ts = np.array(self.t_samples); ts[1:]-=1
+        _, axs = plt.subplots(len(ts), nsamples, figsize=figsize)
+        for i in range(len(ts)):
+            for j in range(nsamples):
+                axs[i,j].imshow(self.y_norm[j*multiplier, ts[i], :, :, p_s], cmap=self.y_cmaps[p_s])
+                axs[i,j].set(xticks=[], yticks=[])
+                axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
+                axs[i,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
+        plt.show()
+    
+    def plot_data(self, nsamples=10, multiplier=1, p_s=1, figsize=(12,15)):
+        ts = np.array(self.t_samples); ts[1:]-=1
+        nx, ny = self.x_channels, len(ts)
+        _, axs = plt.subplots(nx+ny, nsamples, figsize=figsize, tight_layout=True)
+        # features
+        for i in range(nx):
+            for j in range(nsamples):
+                axs[i,j].imshow(self.X_norm[j*multiplier, :, :, i], cmap=self.x_cmaps[i])
+            axs[i,0].set_ylabel(self.x_data_labels[i], weight='bold')
+        # targets
+        for i in range(ny):
+            for j in range(nsamples):
+                p = i+nx
+                axs[p,j].imshow(self.y_norm[j*multiplier, ts[i], :, :, p_s], cmap=self.y_cmaps[p_s])
+            axs[p,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
+        # plotting
+        for j in range(nsamples):
+            axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
+            for i in range(nx+ny):
+                axs[i,j].set(xticks=[], yticks=[])
+        plt.show()
+
+    def plot_single_results(self, realization, train_or_test='train', figsize=(20,4)):
         labels = ['True', 'Predicted', 'Abs. Error']
         if train_or_test == 'train':
             x, y, yhat = self.X_train, self.y_train, self.y_train_pred
@@ -351,36 +351,25 @@ class SpatiotemporalCO2:
         plt.figure(figsize=figsize)
         for i in range(4):
             plt.subplot(1,4,i+1)
-            plt.imshow(x[realization,:,:,i], cmap=cmaps[i])
+            plt.imshow(x[realization,:,:,i], cmap=self.x_cmaps[i])
             plt.xticks([]); plt.yticks([]); plt.title(self.x_data_labels[i], weight='bold')
         plt.suptitle('Geologic Models (static inputs) - R{}'.format(realization), weight='bold'); plt.show()
-        # Pressure results (dynamic output 0)
-        fig, axs = plt.subplots(3, len(self.t_samples), figsize=figsize)
-        for j in range(len(self.t_samples)):
-            true, pred = y[realization,j,:,:,0], yhat[realization,j,:,:,0]
-            axs[0,j].imshow(true, cmap=cmaps[0])
-            axs[1,j].imshow(pred, cmap=cmaps[0])
-            axs[2,j].imshow(np.abs(true-pred), cmap=cmaps[-1])
-            axs[0,j].set_title('t={}'.format(self.t_samples[j]), weight='bold')
-            for i in range(3):
-                axs[i,j].set(xticks=[], yticks=[])
-                axs[i,0].set_ylabel(labels[i], weight='bold')
-        fig.suptitle('Pressure Results - R{} - {}'.format(realization, train_or_test), weight='bold'); plt.show()
-        # Saturation results (dynamic output 1)
-        fig, axs = plt.subplots(3, len(self.t_samples), figsize=figsize)
-        for j in range(len(self.t_samples)):
-            true, pred = y[realization,j,:,:,1], yhat[realization,j,:,:,1]
-            axs[0,j].imshow(true, cmap=cmaps[0])
-            axs[1,j].imshow(pred, cmap=cmaps[0])
-            axs[2,j].imshow(np.abs(true-pred), cmap=cmaps[-1])
-            axs[0,j].set_title('t={}'.format(self.t_samples[j]), weight='bold')
-            for i in range(3):
-                axs[i,j].set(xticks=[], yticks=[])
-                axs[i,0].set_ylabel(labels[i], weight='bold')
-        fig.suptitle('Saturation Results - R{} - {}'.format(realization, train_or_test), weight='bold'); plt.show()
-        return None
+        # Reservoir response (dynamic outputs)
+        for k in range(2):
+            fig, axs = plt.subplots(3, len(self.t_samples), figsize=figsize)
+            for j in range(len(self.t_samples)):
+                true, pred = y[realization, j, :, :, k], yhat[realization, j, :, :, k]
+                axs[0,j].imshow(true, cmap=self.y_cmaps[k])
+                axs[1,j].imshow(pred, cmap=self.y_cmaps[k])
+                axs[2,j].imshow(np.abs(true-pred), cmap=self.err_cmap)
+                axs[0,j].set_title('t={}'.format(self.t_samples[j]), weight='bold')
+                for i in range(3):
+                    axs[i,j].set(xticks=[], yticks=[])
+                    axs[i,0].set_ylabel(labels[i], weight='bold')
+            fig.suptitle(self.y_data_labels[k] + ' Results - R{} - {}'.format(realization, train_or_test), weight='bold')
+            plt.show()
 
-    def cumulative_co2(self, threshold=0.02, figsize=(12,6)):
+    def cumulative_co2(self, threshold=0.02, alpha=0.7, figsize=(12,6)):
         def compare_cumulative_co2(true, pred, thresh=threshold):
             true_co2, pred_co2 = {}, {}
             for i in range(true.shape[0]):
@@ -400,23 +389,22 @@ class SpatiotemporalCO2:
         gs = GridSpec(2,2, hspace=0.25)
         ax1, ax2, ax3 = fig.add_subplot(gs[0,:]), fig.add_subplot(gs[1,0]), fig.add_subplot(gs[1,1])
         ax1.axline([1000,1000],[10000,10000], c='r', linestyle='-', linewidth=3)
-        ax1.scatter(true_co2_train, pred_co2_train, alpha=0.7, label='train')
-        ax1.scatter(true_co2_test,  pred_co2_test,  alpha=0.7, label='test')
+        ax1.scatter(true_co2_train, pred_co2_train, alpha=alpha, label='train')
+        ax1.scatter(true_co2_test,  pred_co2_test,  alpha=alpha, label='test')
         ax1.set_xlabel('True', weight='bold'); ax1.set_ylabel('Predicted', weight='bold')
         ax1.legend(); ax1.grid('on'); 
         ax2.hist(true_co2_train, edgecolor='gray', label='true')
-        ax2.hist(pred_co2_train, edgecolor='gray', alpha=0.75, label='pred')
+        ax2.hist(pred_co2_train, edgecolor='gray', alpha=alpha, label='pred')
         ax2.set_xlabel('Train', weight='bold'); ax2.legend()
         ax3.hist(true_co2_test, edgecolor='gray', label='true')
-        ax3.hist(pred_co2_test, edgecolor='gray', alpha=0.75, label='pred')
+        ax3.hist(pred_co2_test, edgecolor='gray', alpha=alpha, label='pred')
         ax3.set_xlabel('Test', weight='bold'); ax3.legend()
         plt.show()
         return None
         
     def latent_space(self, train_or_test='train', plot=True, 
-                        nrows=4, ncols=5, imult=200, jmult=30, alpha=0.65,
-                        well_color='red', well_marker='$\swarrow$',
-                        cmaps=['afmhot_r', 'gray', 'jet', 'jet'], figsize=(10,5)):
+                     nrows=4, ncols=5, imult=1, jmult=None, alpha=0.65,
+                     well_color='red', well_marker='$\swarrow$', figsize=(10,5)):
         if train_or_test == 'train':
             data = self.X_train
         elif train_or_test == 'test':
@@ -430,27 +418,28 @@ class SpatiotemporalCO2:
             return self.z
         titles = [r'Poro $\otimes$ $\overline{FM}$', r'Facies $\otimes$ $\overline{FM}$']
         if plot == True:
+            if jmult == None:
+                jmult = self.z.shape[-1]//ncols
             _, axs = plt.subplots(nrows, ncols+2, figsize=figsize)
             for i in range(nrows):
                 for j in range(ncols):
                     p, q = i*imult, j*jmult
                     poro, facies = data[p,:,:,0], data[p,:,:,2]
                     w = data[p,:,:,-1]; wlocs = np.argwhere(w!=0)
-                    axs[i,j].imshow(self.z[p,:,:,q], cmap=cmaps[0])
+                    axs[i,j].imshow(self.z[p,:,:,q], cmap=self.latent_cmap[0])
                     axs[i,j].set(xticks=[], yticks=[])
                     axs[i,0].set_ylabel('R {}'.format(p)); axs[0,j].set_title('FM {}'.format(q))
-                im1 = axs[i,ncols].imshow(poro, cmap=cmaps[2])
-                axs[i,ncols].imshow(z_mean[i], cmap=cmaps[1], alpha=alpha, extent=im1.get_extent())
+                im1 = axs[i,ncols].imshow(poro, cmap=self.x_cmaps[0])
+                axs[i,ncols].imshow(z_mean[i], cmap=self.latent_cmap[1], alpha=alpha, extent=im1.get_extent())
                 axs[i,ncols].scatter(wlocs[:,1], wlocs[:,0], c=well_color, marker=well_marker)
                 axs[0,ncols].set(title=titles[0]); axs[i,ncols].set(xticks=[], yticks=[])               
-                im2 = axs[i,ncols+1].imshow(facies, cmap=cmaps[3])
-                axs[i,ncols+1].imshow(z_mean[i], cmap=cmaps[1], alpha=alpha, extent=im2.get_extent())
+                im2 = axs[i,ncols+1].imshow(facies, cmap=self.x_cmaps[2])
+                axs[i,ncols+1].imshow(z_mean[i], cmap=self.latent_cmap[1], alpha=alpha, extent=im2.get_extent())
                 axs[i,ncols+1].scatter(wlocs[:,1], wlocs[:,0], c=well_color, marker=well_marker)
                 axs[0,ncols+1].set(title=titles[1]); axs[i,ncols+1].set(xticks=[], yticks=[])
             plt.show()
 
-    def feature_map_animation(self, nrows=4, ncols=8, imult=200, jmult=1, figsize=(15,5), cmap='afmhot_r',
-                                blit=False, interval=750):
+    def feature_map_animation(self, nrows=4, ncols=8, imult=200, jmult=1, figsize=(15,5), blit=False, interval=750):
         z1 = self.latent1.predict(self.X_train)
         z2 = self.latent2.predict(self.X_train)
         z3 = self.encoder.predict(self.X_train)
@@ -460,7 +449,7 @@ class SpatiotemporalCO2:
         for i in range(nrows):
             for j in range(ncols):
                 p, q = i*imult, j*jmult
-                axs[i,j].imshow(z[0][p,:,:,q], cmap=cmap)
+                axs[i,j].imshow(z[0][p,:,:,q], cmap=self.latent_cmap[0])
                 axs[i,j].set(xticks=[], yticks=[])
                 axs[0,j].set(title='FM {}'.format(q))
             axs[i,0].set_ylabel('R {}'.format(p))
@@ -468,7 +457,7 @@ class SpatiotemporalCO2:
             for i in range(nrows):
                 for j in range(ncols):
                     p, q = i*imult, j*jmult
-                    axs[i,j].imshow(z[k][p,:,:,q], cmap=cmap)
+                    axs[i,j].imshow(z[k][p,:,:,q], cmap=self.latent_cmap[0])
                     axs[i,j].set(xticks=[], yticks=[])
                     axs[0,j].set(title='FM {}'.format(q))
                 axs[i,0].set_ylabel('R {}'.format(p))
