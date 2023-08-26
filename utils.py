@@ -77,7 +77,7 @@ class SpatiotemporalCO2:
         
         self.cnn_filters = [16,  64, 256]
         self.rnn_filters = [256, 64, 16]
-        self.conv_groups = 2
+        self.conv_groups = 1
         self.rnn_dropout = 0.05
         self.up_interp   = 'nearest'
 
@@ -85,7 +85,7 @@ class SpatiotemporalCO2:
         self.criterion   = self.custom_loss
         self.L1L2_split  = 0.33
         self.ridge_alpha = 0.50
-        self.regular     = None #regularizers.l1(1e-6)
+        self.regular     = regularizers.l1(1e-7)
         self.leaky_slope = 0.25
         self.valid_split = 0.20
 
@@ -181,19 +181,19 @@ class SpatiotemporalCO2:
     def recurrent_decoder(self, z_input, residuals, previous_timestep=None):
         dropout = self.rnn_dropout
         def recurrent_step(inp, filt, res, kern=3, pad='same', drop=dropout):
-            y = ConvLSTM2D(filt, kern, padding=pad, recurrent_dropout=drop)(inp)
+            y = ConvLSTM2D(filt, kern, padding=pad, dropout=drop)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
             y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
             y = Concatenate()([y, res])
             # spatial
             y = Conv2D(filt, kern, padding=pad, groups=self.conv_groups)(y)
-            y = SpatialDropout2D(drop)(y)
+            #y = SpatialDropout2D(drop)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y,1)
             return y
         def recurrent_last(inp, filt, kern=3, pad='same', drop=dropout):
-            y = ConvLSTM2D(filt, kern, padding=pad, recurrent_dropout=drop)(inp)
+            y = ConvLSTM2D(filt, kern, padding=pad, dropout=drop)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
             #y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
@@ -201,7 +201,7 @@ class SpatiotemporalCO2:
             y = BatchNormalization()(y)
             # spatial
             y = Conv2D(self.y_channels, kern, padding=pad, groups=self.conv_groups)(y)
-            y = SpatialDropout2D(drop)(y)
+            #y = SpatialDropout2D(drop)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y, 1)
             return y
