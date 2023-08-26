@@ -5,6 +5,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.animation import FuncAnimation
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
+from skimage.util import random_noise
 
 import keras.backend as K
 from keras import Model, regularizers
@@ -82,8 +83,8 @@ class SpatiotemporalCO2:
 
         self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-5)
         self.criterion   = self.custom_loss
-        self.L1L2_split  = 1/3
-        self.ridge_alpha = 2/3
+        self.L1L2_split  = 0.33
+        self.ridge_alpha = 0.60
         self.regular     = regularizers.l1(1e-6)
         self.leaky_slope = 0.30
         self.valid_split = 0.20
@@ -102,8 +103,16 @@ class SpatiotemporalCO2:
             y_data[i] = np.load(self.output_targets_dir + '/y_data_{}.npy'.format(i))
         self.X_data, self.y_data = np.moveaxis(X_data, 1, -1), np.moveaxis(y_data, 2, -1)
         print('X: {} | y: {}'.format(self.X_data.shape, self.y_data.shape))
-
-    def process_data(self, n_subsample=None, augment=True, rotations=3):
+    
+    def apply_noise(self, image_array):
+        noisy_array = np.zeros_like(image_array)
+        for i in range(image_array.shape[0]):
+            for c in range(image_array.shape[-1]-1):
+                noisy_array[i,:,:,c] = random_noise(image_array[i,:,:,c], mode='poisson')
+            noisy_array[...,-1] = image_array[...,-1] #keep Wells channel same
+        return noisy_array
+        
+    def process_data(self, n_subsample=None, augment=True, rotations=3, add_noise=True):
         # data augmentation
         if augment==True:
             xrot = np.rot90(self.X_data, k=rotations, axes=(1,2))
@@ -116,10 +125,14 @@ class SpatiotemporalCO2:
             y = self.y_data
         # feature processing
         num, height, width, channels = x.shape
-        self.X_norm = MinMaxScaler().fit_transform( x.reshape(num*height*width, channels)).reshape(num, height, width, channels)
+        xn = MinMaxScaler().fit_transform(x.reshape(num*height*width, channels)).reshape(x.shape)
+        if add_noise == True:
+            self.X_norm = self.apply_noise(xn)
+        else:
+            self.X_norm = xn
         # target processing
         num, tsteps, height, width, channels = y.shape
-        self.y_norm = MinMaxScaler().fit_transform(y.reshape(num*tsteps, -1)).reshape(num, tsteps, height, width, channels)
+        self.y_norm = MinMaxScaler().fit_transform(y.reshape(num*tsteps, -1)).reshape(y.shape)
         print('MinMax Normalization Done! - [{}, {}]'.format(self.X_norm.min(), self.X_norm.max()))
         # train-test split and subsampling
         ts = np.array(self.t_samples); ts[1:]-=1
@@ -129,8 +142,16 @@ class SpatiotemporalCO2:
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm[idx], self.y_norm[idx][:,ts], test_size=self.test_size)
         else:
             self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_norm, self.y_norm[:,ts], test_size=self.test_size)
+        if self.save_model == True:
+            np.savez('xy_data.npz', X_train=self.X_train, X_test=self.X_test, y_train=self.y_train, y_test=self.y_test)
         print('Train - X: {} | y: {}'.format(self.X_train.shape, self.y_train.shape))
         print('Test  - X: {}  | y: {}'.format(self.X_test.shape, self.y_test.shape))
+        
+    def load_preprocessed_xy_train_test(self, filename):
+        loaded_data = np.load(filename)
+        self.X_train, self.X_test = loaded_data['X_train'], loaded_data['X_test']
+        self.y_train, self.y_test = loaded_data['y_train'], loaded_data['y_test']
+        return (self.X_train, self.X_test), (self.y_train, self.y_test)
 
     def custom_loss(self, true, pred):
         ssim_loss = tf.reduce_mean(1.0 - SSIM(true, pred, max_val=1.0))
@@ -175,7 +196,9 @@ class SpatiotemporalCO2:
             y = ConvLSTM2D(filt, kern, padding=pad, recurrent_dropout=drop)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
-            y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
+            #y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
+            y = Conv2DTranspose(filt, kern, padding='same', strides=2, activity_regularizer=self.regular)(y)
+            y = BatchNormalization()(y)
             # spatial
             y = Conv2D(self.y_channels, kern, padding=pad, groups=self.conv_groups)(y)
             y = SpatialDropout2D(drop)(y)
@@ -306,7 +329,7 @@ class SpatiotemporalCO2:
                 axs[i,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
         plt.show()
     
-    def plot_data(self, nsamples=10, multiplier=1, p_s=1, figsize=(12,15)):
+    def plot_data(self, nsamples=10, multiplier=200, p_s=1, figsize=(12,15)):
         ts = np.array(self.t_samples); ts[1:]-=1
         nx, ny = self.x_channels, len(ts)
         _, axs = plt.subplots(nx+ny, nsamples, figsize=figsize, tight_layout=True)
