@@ -77,20 +77,20 @@ class SpatiotemporalCO2:
         
         self.cnn_filters = [16,  64, 256]
         self.rnn_filters = [256, 64, 16]
-        self.conv_groups = 1
-        self.rnn_dropout = 0.1
+        self.conv_groups = 2
+        self.rnn_dropout = 0.05
         self.up_interp   = 'nearest'
 
         self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-5)
         self.criterion   = self.custom_loss
         self.L1L2_split  = 0.33
-        self.ridge_alpha = 0.60
-        self.regular     = regularizers.l1(1e-6)
-        self.leaky_slope = 0.30
+        self.ridge_alpha = 0.50
+        self.regular     = None #regularizers.l1(1e-6)
+        self.leaky_slope = 0.25
         self.valid_split = 0.20
 
         self.num_epochs  = 100
-        self.batch_size  = 60
+        self.batch_size  = 50
         self.lr_decay    = 15
         self.verbose     = 0
 
