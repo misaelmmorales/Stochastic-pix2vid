@@ -57,7 +57,7 @@ class SpatiotemporalCO2:
         self.leaky_slope = 0.25
         self.valid_split = 0.20
 
-        self.num_epochs  = 200
+        self.num_epochs  = 100
         self.batch_size  = 50
         self.lr_decay    = 20
         self.verbose     = 0
@@ -81,7 +81,7 @@ class SpatiotemporalCO2:
             y = Conv2DTranspose(filt, kern, padding=pad, strides=2, activity_regularizer=self.regular)(y)
             y = SpatialDropout2D(drop)(y)
             y = Concatenate()([y, res])
-            y = Conv2D(filt, kern, padding=pad, activity_regularizer=self.regular)(y)
+            y = Conv2D(filt, kern, padding=pad)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y,1)
             return y
@@ -91,7 +91,7 @@ class SpatiotemporalCO2:
             y = LeakyReLU(self.leaky_slope)(y)
             y = Conv2DTranspose(filt, kern, padding=pad, strides=2, activity_regularizer=self.regular)(y)
             y = SpatialDropout2D(drop)(y)
-            y = Conv2D(self.y_channels, kern, padding=pad, activity_regularizer=self.regular)(y)
+            y = Conv2D(self.y_channels, kern, padding=pad)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y, 1)
             return y
