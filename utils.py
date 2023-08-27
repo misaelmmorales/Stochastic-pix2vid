@@ -52,7 +52,7 @@ class SpatiotemporalCO2:
         self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-5)
         self.criterion   = self.custom_loss
         self.L1L2_split  = 0.33
-        self.ridge_alpha = 0.60
+        self.ridge_alpha = 0.66
         self.regular     = regularizers.l1(1e-6)
         self.leaky_slope = 0.25
         self.valid_split = 0.20
@@ -78,7 +78,7 @@ class SpatiotemporalCO2:
             y = ConvLSTM2D(filt, kern, padding=pad)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
-            y = Conv2DTranspose(filt, kern, padding=pad, strides=2, activity_regularizer=self.regular)(y)
+            y = Conv2DTranspose(filt, kern, padding=pad, strides=2)(y)
             y = SpatialDropout2D(drop)(y)
             y = Concatenate()([y, res])
             y = Conv2D(filt, kern, padding=pad)(y)
@@ -89,7 +89,7 @@ class SpatiotemporalCO2:
             y = ConvLSTM2D(filt, kern, padding=pad)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
-            y = Conv2DTranspose(filt, kern, padding=pad, strides=2, activity_regularizer=self.regular)(y)
+            y = Conv2DTranspose(filt, kern, padding=pad, strides=2)(y)
             y = SpatialDropout2D(drop)(y)
             y = Conv2D(self.y_channels, kern, padding=pad)(y)
             y = Activation('sigmoid')(y)
@@ -172,7 +172,8 @@ class SpatiotemporalCO2:
         print('Training Time: {:.2f} minutes'.format(train_time/60))
         self.plot_loss()
         if self.save_model:
-            self.model.save('cnn_rnn_proxy')
+            #self.model.save('cnn_rnn_proxy')
+            self.model.save_weights('cnn_rnn_proxy_weights.h5')
         if self.return_data:
             return self.model, self.fit
 
@@ -387,7 +388,7 @@ class SpatiotemporalCO2:
                 axs[0,ncols+1].set(title=titles[1]); axs[i,ncols+1].set(xticks=[], yticks=[])
             plt.show()
 
-    def feature_map_animation(self, nrows=4, ncols=8, imult=200, jmult=1, figsize=(15,5), blit=False, interval=750):
+    def feature_map_animation(self, nrows=4, ncols=8, imult=200, jmult=1, figsize=(15,5), blit=False, interval=900):
         z1 = self.latent1.predict(self.X_train)
         z2 = self.latent2.predict(self.X_train)
         z3 = self.encoder.predict(self.X_train)

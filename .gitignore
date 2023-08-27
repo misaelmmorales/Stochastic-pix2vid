@@ -24,3 +24,4 @@ cnn_rnn_proxy/saved_model.pb
 old_repo/X_temp.npy
 old_repo/y_temp.npy
 xy_data.npz
+model_weights.h5
