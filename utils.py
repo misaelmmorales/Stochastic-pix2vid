@@ -84,14 +84,14 @@ class SpatiotemporalCO2:
         self.optimizer   = AdamW(learning_rate=1e-3, weight_decay=1e-5)
         self.criterion   = self.custom_loss
         self.L1L2_split  = 0.33
-        self.ridge_alpha = 0.50
-        self.regular     = regularizers.l1(1e-7)
+        self.ridge_alpha = 0.66
+        self.regular     = regularizers.l1(1e-6)
         self.leaky_slope = 0.25
         self.valid_split = 0.20
 
         self.num_epochs  = 100
         self.batch_size  = 50
-        self.lr_decay    = 15
+        self.lr_decay    = 20
         self.verbose     = 0
 
     def load_data(self):
@@ -104,15 +104,18 @@ class SpatiotemporalCO2:
         self.X_data, self.y_data = np.moveaxis(X_data, 1, -1), np.moveaxis(y_data, 2, -1)
         print('X: {} | y: {}'.format(self.X_data.shape, self.y_data.shape))
     
-    def apply_noise(self, image_array):
+    def apply_noise(self, image_array, noise_type='gaussian', var=1e-6):
         noisy_array = np.zeros_like(image_array)
         for i in range(image_array.shape[0]):
             for c in range(image_array.shape[-1]-1):
-                noisy_array[i,:,:,c] = random_noise(image_array[i,:,:,c], mode='poisson')
+                if (noise_type=='gaussian' or noise_type=='speckle'):
+                    noisy_array[i,:,:,c] = random_noise(image_array[i,:,:,c], mode=noise_type, var=var)                    
+                else:
+                    noisy_array[i,:,:,c] = random_noise(image_array[i,:,:,c], mode=noise_type)
             noisy_array[...,-1] = image_array[...,-1] #keep Wells channel same
         return noisy_array
         
-    def process_data(self, n_subsample=None, augment=True, rotations=3, add_noise=True):
+    def process_data(self, n_subsample=None, augment=True, rotations=3, add_noise=False):
         # data augmentation
         if augment==True:
             xrot = np.rot90(self.X_data, k=rotations, axes=(1,2))
@@ -170,7 +173,7 @@ class SpatiotemporalCO2:
                 print('Epoch: [{}/{}] - Loss: {:.4f} - Val Loss: {:.4f}'.format(epoch+1, SpatiotemporalCO2().num_epochs, logs['loss'], logs['val_loss']))
 
     def encoder_layer(self, inp, filt, kern=3, pad='same'):
-        _ = SeparableConv2D(filt, kern, padding=pad, activity_regularizer=self.regular, depth_multiplier=self.conv_groups)(inp)
+        _ = SeparableConv2D(filt, kern, padding=pad, activity_regularizer=self.regular)(inp)
         _ = SqueezeExcite()(_)
         _ = InstanceNormalization()(_)
         _ = PReLU()(_)
@@ -181,33 +184,30 @@ class SpatiotemporalCO2:
     def recurrent_decoder(self, z_input, residuals, previous_timestep=None):
         dropout = self.rnn_dropout
         def recurrent_step(inp, filt, res, kern=3, pad='same', drop=dropout):
-            y = ConvLSTM2D(filt, kern, padding=pad, dropout=drop)(inp)
+            y = ConvLSTM2D(filt, kern, padding=pad)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
-            y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
+            # second
+            y = Conv2DTranspose(filt, kern, padding=pad, strides=2)(y)
+            y = SpatialDropout2D(self.rnn_dropout)(y)
             y = Concatenate()([y, res])
-            # spatial
-            y = Conv2D(filt, kern, padding=pad, groups=self.conv_groups)(y)
-            #y = SpatialDropout2D(drop)(y)
+            # sptial
+            y = Conv2D(filt, kern, padding=pad)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y,1)
             return y
         def recurrent_last(inp, filt, kern=3, pad='same', drop=dropout):
-            y = ConvLSTM2D(filt, kern, padding=pad, dropout=drop)(inp)
+            y = ConvLSTM2D(filt, kern, padding=pad)(inp)
             y = BatchNormalization()(y)
             y = LeakyReLU(self.leaky_slope)(y)
-            #y = UpSampling2D(interpolation=self.up_interp)(y) #Conv2DTranspose
-            y = Conv2DTranspose(filt, kern, padding='same', strides=2, activity_regularizer=self.regular)(y)
-            y = BatchNormalization()(y)
-            # spatial
-            y = Conv2D(self.y_channels, kern, padding=pad, groups=self.conv_groups)(y)
-            #y = SpatialDropout2D(drop)(y)
+            # second
+            y = Conv2DTranspose(filt, kern, padding=pad, strides=2)(y)
+            y = SpatialDropout2D(self.rnn_dropout)(y)
+            # sptial
+            y = Conv2D(self.y_channels, kern, padding=pad)(y)
             y = Activation('sigmoid')(y)
             y = tf.expand_dims(y, 1)
             return y
-        # recurrent-decoder architecture
-        #res3, res2 = residuals
-        #filt3, filt2, filt1 = self.rnn_filters
         _ = tf.expand_dims(z_input, 1)
         _ = recurrent_step(_, self.rnn_filters[0], residuals[0])
         _ = recurrent_step(_, self.rnn_filters[1], residuals[1])
