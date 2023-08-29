@@ -335,7 +335,7 @@ class SpatiotemporalCO2:
             plt.subplot(1,4,i+1)
             plt.imshow(x[realization,:,:,i], cmap=self.x_cmaps[i])
             plt.xticks([]); plt.yticks([]); plt.title(self.x_data_labels[i], weight='bold')
-        plt.suptitle('Geologic Models (static inputs) - R{}'.format(realization), weight='bold'); plt.show()
+        plt.suptitle('Geologic Models - R{}'.format(realization), weight='bold'); plt.show()
         # Reservoir response (dynamic outputs)
         for k in range(2):
             fig, axs = plt.subplots(3, len(self.t_samples), figsize=figsize)
@@ -425,8 +425,8 @@ class SpatiotemporalCO2:
             true_co2 = np.array(list(true_co2.values()))
             pred_co2 = np.array(list(pred_co2.values()))
             return true_co2, pred_co2
-        true_co2_train, pred_co2_train = compare_cumulative_co2(self.y_train, self.y_train_pred)
-        true_co2_test,  pred_co2_test  = compare_cumulative_co2(self.y_test,  self.y_test_pred) 
+        true_co2_train,  pred_co2_train  = compare_cumulative_co2(self.y_train, self.y_train_pred)
+        true_co2_test,   pred_co2_test   = compare_cumulative_co2(self.y_test,  self.y_test_pred) 
         mean_train_true, mean_train_pred = true_co2_train.mean(), pred_co2_train.mean()
         mean_test_true,  mean_test_pred  = true_co2_test.mean(),  pred_co2_test.mean()
         print('Train - Mean CO2 Injected: True: {:.2f} | Pred: {:.2f}'.format(mean_train_true, mean_train_pred))
