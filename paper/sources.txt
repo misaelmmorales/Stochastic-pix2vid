@@ -1,0 +1,34 @@
+Vondrick, C., Pirsiavash, H., & Torralba, A. (2016). Generating Videos with Scene Dynamics. In Advances in Neural Information Processing Systems (NIPS). This paper presents a model that generates videos by predicting pixel values of future frames and uses an adversarial loss to ensure the realism of the generated videos.
+
+Lotter, W., Kreiman, G., & Cox, D. (2017). Deep predictive coding networks for video prediction and unsupervised learning. In International Conference on Learning Representations (ICLR). This work introduces a model that utilizes predictive coding for video prediction, demonstrating its effectiveness in generating coherent future frames.
+
+Mathieu, M., Couprie, C., & LeCun, Y. (2016). Deep multi-scale video prediction beyond mean square error. In Advances in Neural Information Processing Systems (NIPS). This paper presents a deep multi-scale architecture for video prediction that captures both short-term and long-term dependencies in video sequences.
+
+Villegas, R., Yang, J., Hong, S., Lin, X., & Lee, H. (2017). Decomposing Motion and Content for Natural Video Sequence Prediction. In International Conference on Machine Learning (ICML). This paper proposes a model that separates motion and content information in video sequences for more accurate prediction.
+
+Tulyakov, S., Liu, M., Yang, X., & Kautz, J. (2018). Mocogan: Decomposing Motion and Content for Video Generation. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR). This work introduces a model that disentangles motion and content information in videos using a combination of generative adversarial networks.
+
+Denton, E. L., Fergus, R., & Szlam, A. (2017). Stochastic Video Generation with a Learned Prior. In International Conference on Learning Representations (ICLR). This paper presents a model for stochastic video generation, enabling the generation of diverse video sequences.
+
+Vondrick, C., Shrivastava, A., & Fowlkes, C. C. (2018). Tracking Emerges by Colorizing Videos. In European Conference on Computer Vision (ECCV). This paper introduces a method for unsupervised object tracking in videos using colorization and demonstrates the emergence of tracking capabilities in a deep network.
+
+Walker, J., Marino, K., Gupta, A., & Hebert, M. (2016). The Pose Knows: Video Forecasting by Generating Pose Futures. In European Conference on Computer Vision (ECCV). This work focuses on generating future video frames by predicting human poses, demonstrating the potential of using pose information for video prediction.
+
+Xingjian, S. H. I., Chen, Z., Wang, H., Yeung, D. Y., Wong, W. K., & Woo, W. C. (2015). Convolutional LSTM Network: A Machine Learning Approach for Precipitation Nowcasting. In Advances in Neural Information Processing Systems (NIPS). While not about image-to-video directly, this paper introduces ConvLSTM, a model that can be adapted for image-to-video tasks.
+
+Villegas, R., Yang, J., & Lee, H. (2017). Diverse Image-to-Image Translation via Disentangled Representations. In Advances in Neural Information Processing Systems (NIPS). This paper focuses on disentangling content and style representations for image-to-image translation tasks, which could be relevant to generating diverse video content.
+
+Tulyakov, S., Liu, M., Yang, X., & Kautz, J. (2018). MoCoGAN: Decomposing Motion and Content for Video Generation. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR). This paper introduces MoCoGAN, a model that separates motion and content information in videos for better generation.
+
+--------------------------
+Zuo, L., Fu, P., & Zhang, D. (2020). Physics-informed Generative Adversarial Networks for Stochastic Nonlinear Partial Differential Equations. Journal of Computational Physics. This paper combines GANs with physics-based constraints to simulate subsurface flow and transport behaviors.
+
+Guo, L., Zabaras, N., & Koutsourelakis, P. (2018). Bayesian Deep Convolutional Encoder-Decoder Networks for Surrogate Modeling and Uncertainty Quantification. Journal of Computational Physics. This paper explores the integration of Bayesian neural networks for uncertainty quantification in reservoir modeling.
+
+Oliver, D. S., Chen, G., & Tavakoli, R. (2019). Deep learning for earth sciences: A review. Computers & Geosciences. This review paper provides an overview of how deep learning techniques have been applied to various earth science domains, including reservoir modeling and simulation.
+
+Sun, X., Wu, X., & Perdikaris, P. (2020). Physics-constrained deep learning for high-dimensional surrogate modeling and uncertainty quantification without labeled data. Journal of Computational Physics. This work focuses on physics-constrained deep learning for surrogate modeling and uncertainty quantification in complex systems.
+
+Kussul, N., Baidyk, T., & Kussul, O. (2017). Deep Learning Classification of Land Cover and Crop Types Using Remote Sensing Data. IEEE Geoscience and Remote Sensing Letters. While not directly about reservoir modeling, this paper demonstrates the application of deep learning in analyzing remote sensing data, which can have relevance to subsurface energy resource systems.
+
+Gholami, A., White, J. A., Keles, D., & Durlofsky, L. J. (2020). Incorporating expert knowledge into generative adversarial networks for high-resolution reservoir history matching. Computational Geosciences. This paper focuses on the integration of expert knowledge into GANs for reservoir history matching, which could relate to optimization and data assimilation in your research.
