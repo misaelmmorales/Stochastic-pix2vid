@@ -460,6 +460,7 @@ def check_tensorflow_gpu():
     print("TF: {} | CUDA: {} | cuDNN: {}".format(tf.__version__, cuda_version, cudnn_version))
     print('# GPU available: {} ({})'.format(num_gpu_avail, gpu_name))
     #print(tf.config.list_physical_devices())
+    print('--------------------------------------')
     return None
 
 class SqueezeExcite(Layer):
