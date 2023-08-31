@@ -288,31 +288,38 @@ class SpatiotemporalCO2:
                 axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
         plt.show()
     
-    def plot_targets(self, p_s=1, nsamples=10, multiplier=1, figsize=(15,10)):
+    def plot_targets(self, p_s=1, nsamples=10, multiplier=1, masked=False, figsize=(15,10)):
         ts = np.array(self.t_samples); ts[1:]-=1
         _, axs = plt.subplots(len(ts), nsamples, figsize=figsize)
         for i in range(len(ts)):
             for j in range(nsamples):
-                axs[i,j].imshow(self.y_norm[j*multiplier, ts[i], :, :, p_s], cmap=self.y_cmaps[p_s])
+                yy = self.y_norm[j*multiplier, ts[i], :, :, p_s]
+                if masked==True:
+                    yy = np.ma.masked_where(yy==0, yy)
+                axs[i,j].imshow(yy, cmap=self.y_cmaps[p_s])
                 axs[i,j].set(xticks=[], yticks=[])
                 axs[0,j].set_title('R{}'.format(j*multiplier), weight='bold')
                 axs[i,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
         plt.show()
     
-    def plot_data(self, nsamples=10, multiplier=200, p_s=1, figsize=(12,15)):
+    def plot_data(self, nsamples=10, multiplier=200, p_s=1, masked=False, figsize=(12,15)):
         ts = np.array(self.t_samples); ts[1:]-=1
         nx, ny = self.x_channels, len(ts)
         _, axs = plt.subplots(nx+ny, nsamples, figsize=figsize, tight_layout=True)
         # features
         for i in range(nx):
             for j in range(nsamples):
-                axs[i,j].imshow(self.X_norm[j*multiplier, :, :, i], cmap=self.x_cmaps[i])
+                xx = self.X_norm[j*multiplier, :, :, i]
+                axs[i,j].imshow(xx, cmap=self.x_cmaps[i])
             axs[i,0].set_ylabel(self.x_data_labels[i], weight='bold')
         # targets
         for i in range(ny):
             for j in range(nsamples):
                 p = i+nx
-                axs[p,j].imshow(self.y_norm[j*multiplier, ts[i], :, :, p_s], cmap=self.y_cmaps[p_s])
+                yy = self.y_norm[j*multiplier, ts[i], :, :, p_s]
+                if masked==True:
+                    yy = np.ma.masked_where(yy==0, yy)
+                axs[p,j].imshow(yy, cmap=self.y_cmaps[p_s])
             axs[p,0].set_ylabel('t={}'.format(ts[i]+1), weight='bold')
         # plotting
         for j in range(nsamples):
@@ -321,7 +328,7 @@ class SpatiotemporalCO2:
                 axs[i,j].set(xticks=[], yticks=[])
         plt.show()
 
-    def plot_single_results(self, realization, train_or_test='train', figsize=(20,4)):
+    def plot_single_results(self, realization, train_or_test='train', masked=False, figsize=(20,4)):
         labels = ['True', 'Predicted', 'Abs. Error']
         if train_or_test == 'train':
             x, y, yhat = self.X_train, self.y_train, self.y_train_pred
@@ -340,7 +347,10 @@ class SpatiotemporalCO2:
         for k in range(2):
             fig, axs = plt.subplots(3, len(self.t_samples), figsize=figsize)
             for j in range(len(self.t_samples)):
-                true, pred = y[realization, j, :, :, k], yhat[realization, j, :, :, k]
+                true, pred = y[realization, j, :, :, k], yhat[realization, j, :, :, k]                  
+                if masked==True:
+                    true = np.ma.masked_where(true==0, true)
+                    pred = np.ma.masked_where(pred==0, pred)
                 axs[0,j].imshow(true, cmap=self.y_cmaps[k])
                 axs[1,j].imshow(pred, cmap=self.y_cmaps[k])
                 axs[2,j].imshow(np.abs(true-pred), cmap=self.err_cmap)
@@ -350,7 +360,7 @@ class SpatiotemporalCO2:
                     axs[i,0].set_ylabel(labels[i], weight='bold')
             fig.suptitle(self.y_data_labels[k] + ' Results - R{} - {}'.format(realization, train_or_test), weight='bold')
             plt.show()
-        
+
     def latent_space(self, train_or_test='train', plot=True, 
                      nrows=4, ncols=5, imult=1, jmult=None, alpha=0.65,
                      well_color='red', well_marker='$\swarrow$', figsize=(10,5)):
