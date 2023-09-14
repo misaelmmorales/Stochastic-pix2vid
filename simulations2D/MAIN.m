@@ -4,7 +4,7 @@ set(0,'DefaultFigureWindowStyle','docked')
 %set(0,'DefaultFigureWindowStyle','docked')
 
 proj_dir = 'E:/CNN-RNN-CO2/simulations2D';
-mdir = 'C:/Users/Misael Morales/OneDrive - The University of Texas at Austin/Documents/MATLAB/mrst-2021b';
+mdir = 'C:/Users/Misael Morales/OneDrive - The University of Texas at Austin/Documents/MATLAB/mrst-2022b';
 chdir(mdir);
 startup;
 chdir(proj_dir);
@@ -59,6 +59,15 @@ srw = 0.27;
 src = 0.20;
 fluid.krW = @(s) fluid.krW(max((s-srw)./(1-srw), 0));
 fluid.krG = @(s) fluid.krG(max((s-src)./(1-src), 0));
+
+figure; hold on;
+sw = linspace(srw, 1, 200);
+plot(sw, fluid.krW(sw),   'b', 'linewidth', 1.5);
+plot(sw, fluid.krG(1-sw), 'r', 'linewidth', 1.5);
+line([srw, srw], [0 1], 'color', 'black', 'linestyle', '--', 'linewidth', 1);
+xlabel('water saturation'); ylabel('relative permeability')
+set(gca, 'fontsize', 14, 'xlim', [0 1]); 
+legend('Water','CO2', 'Location','northwest'); grid('on')
 
 % Add capillary pressure
 pe = 5 * kilo * Pascal;
