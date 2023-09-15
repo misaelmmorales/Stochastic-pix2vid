@@ -1,4 +1,2 @@
 *.ipynb linguist-detectable=false
-*.tex linguist-detectable=false
 *.tex linguist-vendored
-paper/* linguist-documentation
