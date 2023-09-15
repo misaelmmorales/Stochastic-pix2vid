@@ -1,6 +1,4 @@
 *.ipynb linguist-detectable=false
 *.tex linguist-detectable=false
-tex/* linguist-vendored
-*.toc linguist-vendored
-*.tex -linguist-detectable
-paper/Morales_2023_SpatiotemporalCO2_defualt-template/* linguist-documentation
+*.tex linguist-vendored
+paper/* linguist-documentation
