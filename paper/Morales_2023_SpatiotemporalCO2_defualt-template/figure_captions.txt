@@ -1,0 +1,45 @@
+Figure 1: Types of geologic CO$_2$ storage operations and the geologic formations that can be used for sequestration. \textit{Modified from the Carbon Dioxide Cooperative Research Center (CO2CRC), http://www.co2crc.com.au/about/co2crc}
+
+Figure 2: Dimensionality reduction model structures. Unsupervised AutoEncoder structure (top), and supervised Encoder-Decoder structure (bottom).
+
+Figure 3: Image-to-image (pix2pix) (top) and image-to-timeseries (bottom) Encoder-Decoder structures.
+
+Figure 4: Relative permeability curves for the CO$_2$-water system. The residual saturations are 0.27 and 0.2 for water and CO$_2$, respectively.
+
+Figure 5: Schematic for a separable convolutional layer. Each channel is convolved with its own set of convolutional filters to obtain the best representation, as opposed to traditional convolutions where the same filter is applied to all channels in the data.
+
+Figure 6: Schematic for a squeeze-and-excite layer. The "squeeze" layer takes the global average of the data for each channel, and the "excite" layer is a fully-connected layer with nonlinear activation to estimate the optimal weights for each channel in the data. The result is a weighted representation of the data based on their intrinsic global characteristics.
+
+Figure 7: Schematic for instance normalization (left) compared to group normalization (center) and batch normalization (right). In an instance normalization layer, each channel will be normalized by themselves rather than normalizing the entire batch or a subset of channels (groups).
+
+Figure 8: Schematic for the Parametric Rectified Linear Unit (PReLU) activation function (right) compared to the traditional ReLU activation function (left). The slope of the negative portion of the data, $\alpha$, is learned for each batch.
+
+Figure 9: Schematic of a convolutional-LSTM (ConvLSTM) layer. The layer applies convolutional operations to the input data using a set of learnable filters to capture the spatial patterns. The recurrent part is a long short-term memory layer with memory and forget gates to capture the temporal patterns. LSTM units are applied to each spatial location separately allowing to capture both spatial and temporal dependencies in the data.
+
+Figure 10: Architecture of our proposed Stochastic pix2vid method. The input data, $X\equiv m$, is encoded through a series of convolutional layers to capture the spatial dependencies in the geologic models. The latent representation, $z_m$, is recursively passed through a spatiotemporal decoder with convolutional-recurrent layers, and concatenated with the residuals of the encoder to reconstruct iteratively the frames of the output (video) data, $y\equiv d$.
+
+Figure 11: Spatial distribution of porosity (top), permeability (middle), and facies (bottom) for 5 random realizations.
+
+Figure 12: Spatial distribution conditioned to facies (top) for porosity (middle) and permeability (bottom) for 5 random realizations.
+
+Figure 13: CO$_2$ injection well(s) location (red) overlaid over facies distributions for 5 random realizations.
+
+Figure 14: Pressure response distributions over time (in psia) obtained by HFS for the 5 random realizations from Fig. \ref{conditioned_geomodels}.
+
+Figure 15: Saturation response distributions over time obtained by HFS for the 5 random realizations obtained from Fig. \ref{conditioned_geomodels}.
+
+Figure 16: The total training and validation losses, $\mathcal{L}$, as a function of epoch number.
+
+Figure 17: Normalized pressure distribution over time for 3 random training realization. For each panel, the top row is the ground truth from the HFS, the middle row is the Stochastic pix2vid prediction, and the bottom row is the absolute difference to HFS.
+
+Figure 18: Saturation distribution over time for 3 random training realization. For each panel, the top row is the ground truth from the HFS, the middle row is the Stochastic pix2vid prediction, and the bottom row is the absolute difference to HFS.
+
+Figure 19: Normalized pressure distribution over time for 3 random testing realization. For each panel, the top row is the ground truth from the HFS, the middle row is the Stochastic pix2vid prediction, and the bottom row is the absolute difference to HFS.
+
+Figure 20: Saturation distribution over time for 3 random testing realization. For each panel, the top row is the ground truth from the HFS, the middle row is the Stochastic pix2vid prediction, and the bottom row is the absolute difference to HFS.
+
+Figure 21: Five random feature maps (FM) of $z_m^3$ for 4 random realizations. Their average is superimposed on top of the porosity and facies distributions to show the attention mechanism of the encoder. Bright colors represent higher attention and dark colors represent lower attention.
+
+Figure 22: True versus predicted average normalized pressure (top) and saturation (bottom) over time for the testing data. The gray portion represents the 95\% confidence bands, which narrow over time.
+
+Figure 23: (Top) True vs. predicted cumulative CO$_2$ volume injected via pixel-wise saturation. (Bottom) True vs. predicted distributions of cumulative CO$_2$ saturation for training (left) and testing (right).
