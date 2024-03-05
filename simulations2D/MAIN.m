@@ -95,7 +95,6 @@ inj_time = sum(timestep1)/year;
 timestep1 = rampupTimesteps(5*year, year/12, 0);
 total_time = timestep1;
 
-
 %% Generate Models & Run Simulation
 N = 1000;
 M = size(total_time,1);
