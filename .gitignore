@@ -1,13 +1,3 @@
-paper/*
-<<<<<<< Updated upstream
-simulations2D/perm2d.csv
-=======
-<<<<<<< HEAD
-simulations3D/perm3d.csv
-=======
-simulations2D/perm2d.csv
->>>>>>> 7906796cce57cd2584b3887c71c8e445750f702a
->>>>>>> Stashed changes
 *.mat
 simulations2D/data/facies.npy
 simulations2D/data/perm.npy
@@ -24,4 +14,4 @@ cnn_rnn_proxy/saved_model.pb
 old_repo/X_temp.npy
 old_repo/y_temp.npy
 xy_data.npz
-model_weights.h5
+stochastic_pix2vid_weights.h5
