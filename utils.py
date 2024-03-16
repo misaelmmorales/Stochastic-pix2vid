@@ -1,8 +1,12 @@
-import numpy as np
+import os
 from time import time
+from datetime import datetime
+import numpy as np
+
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.animation import FuncAnimation
+
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from skimage.util import random_noise
@@ -33,7 +37,7 @@ class SpatiotemporalCO2:
         self.err_cmap      = 'binary'
         self.latent_cmap   = ['afmhot_r', 'gray']
         self.return_data   = False
-        self.save_model    = False
+        self.save_model    = True
 
         self.n_samples   = 1000
         self.x_channels  = 4
@@ -172,8 +176,7 @@ class SpatiotemporalCO2:
         print('Training Time: {:.2f} minutes'.format(train_time/60))
         self.plot_loss()
         if self.save_model:
-            #self.model.save('cnn_rnn_proxy')
-            self.model.save_weights('cnn_rnn_proxy_weights.h5')
+            self.model.save('stochastic_pix2vid.keras')
         if self.return_data:
             return self.model, self.fit
 
@@ -493,6 +496,28 @@ class SqueezeExcite(Layer):
         return Add()([inputs, scaled_inputs])
     def compute_output_shape(self, input_shape):
         return input_shape
+    
+############################################## MAIN ###############################################
+if __name__ == '__main__':
+    print('-'*80+'\n'+'Date:', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print("Current Working Directory:", os.getcwd())
+    
+    check_tensorflow_gpu()
+    proxy = SpatiotemporalCO2()
+    proxy.__dict__
+
+    proxy.load_data()
+    proxy.process_data()
+
+    proxy.plot_data()
+    proxy.plot_features()
+    proxy.plot_targets()
+
+    proxy.make_model()
+    proxy.training()
+    proxy.predictions()
+    proxy.plot_single_results(411, 'train')
+    proxy.cumulative_co2()
     
 ###################################################################################################
 ############################################### END ###############################################
