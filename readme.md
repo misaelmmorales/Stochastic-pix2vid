@@ -1,4 +1,4 @@
-# Spatiotemporal proxy for geologic CO2 storage prediction
+# Spatiotemporal proxy for geologic CO<sub>2</sub> storage prediction
 
 Repository to accompany the paper:
 
