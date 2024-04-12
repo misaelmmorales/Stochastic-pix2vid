@@ -1,29 +1,49 @@
+############################################################################
+#         STOCHASTIC PIX2VID: A NEW SPATIOTEMPORAL DEEP LEARNING           #
+#  METHOD FOR IMAGE-TO-VIDEO SYNTHESIS IN GEOLOGIC CO2 STORAGE PREDICTION  #
+############################################################################
+# Author: Misael M. Morales (github.com/misaelmmorales)                    #
+# Co-Authors: Dr. Carlos Torres-Verdin, Dr. Michael Pyrcz - UT Austin      #
+# Date: 2024-04                                                            #
+############################################################################
+# Copyright (c) 2024, Misael M. Morales                                    #
+# Licensed under the Apache License, Version 2.0 (the "License");          #
+# you may not use this file except in compliance with the License.         #
+# You may obtain a copy of the License at                                  #
+#     http://www.apache.org/licenses/LICENSE-2.0                           #
+# Unless required by applicable law or agreed to in writing, software      #
+# distributed under the License is distributed on an "AS IS" BASIS,        #
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. #
+# See the License for the specific language governing permissions and      #
+# limitations under the License.                                           #
+############################################################################
+
 import os
 from time import time
 from datetime import datetime
 import numpy as np
+import pandas as pd
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 from matplotlib.gridspec import GridSpec
 from matplotlib.animation import FuncAnimation
 
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from skimage.util import random_noise
-
-import keras.backend as K
-from keras import Model, regularizers
-from keras.layers import *
-from keras.optimizers import SGD, Adam, Nadam
-from keras.losses import MeanSquaredError, MeanAbsoluteError
+from skimage.transform import resize
 
 import tensorflow as tf
 from tensorflow.python.client import device_lib
-from tensorflow_addons.layers import *
-from tensorflow_addons.optimizers import AdamW
-from tensorflow.image import ssim as SSIM
-from tensorflow.keras.metrics import mean_squared_error as MSE
-from tensorflow.keras.callbacks import LearningRateScheduler, ReduceLROnPlateau
+import keras.backend as K
+from keras import Model, regularizers
+from keras.layers import *
+from keras.optimizers import SGD, Adam, Nadam, AdamW
+from keras.losses import MeanSquaredError, MeanAbsoluteError
+from keras.metrics import mean_squared_error as MSE
+from keras.callbacks import LearningRateScheduler, ReduceLROnPlateau
 
 class SpatiotemporalCO2:
     def __init__(self):
@@ -66,11 +86,25 @@ class SpatiotemporalCO2:
         self.lr_decay    = 20
         self.verbose     = 0
 
+
+    def check_tf(self):
+        sys_info, cuda_avail = tf.sysconfig.get_build_info(), tf.test.is_built_with_cuda()
+        devices = tf.config.experimental.list_physical_devices('GPU')
+        count, details = len(devices), tf.config.experimental.get_device_details(devices[0])
+        cudnn_v = details['compute_capability']
+        print('-'*60)
+        print('----------------------- VERSION INFO -----------------------')
+        print('TensorFlow version: {} | TF Built with CUDA? {}'.format(tf.__version__, cuda_avail))
+        print('# Device(s) available: {} | CUDA: {} | cuDNN: {}.{}'.format(count, sys_info['cuda_version'], cudnn_v[0], cudnn_v[1]))
+        print('Name(s): {}'.format(details['device_name']))
+        print('-'*60+'\n')
+        return None
+
     ################################### MODEL ARCHITECTURE ####################################
     def encoder_layer(self, inp, filt, kern=3, pad='same'):
         _ = SeparableConv2D(filt, kern, padding=pad, activity_regularizer=self.regular)(inp)
         _ = SqueezeExcite()(_)
-        _ = InstanceNormalization()(_)
+        _ = BatchNormalization(axis=[0,-1])(_)
         _ = PReLU()(_)
         _ = MaxPooling2D()(_)
         _ = SpatialDropout2D(self.rnn_dropout)(_)
@@ -133,7 +167,7 @@ class SpatiotemporalCO2:
             return self.model
 
     def custom_loss(self, true, pred):
-        ssim_loss = tf.reduce_mean(1.0 - SSIM(true, pred, max_val=1.0))
+        ssim_loss = tf.reduce_mean(1.0 - tf.image.ssim(true, pred, max_val=1.0))
         if self.L1L2_split != None:
             mse_loss = MeanSquaredError()(true, pred)
             mae_loss = MeanAbsoluteError()(true,pred)
@@ -183,7 +217,7 @@ class SpatiotemporalCO2:
     def compute_mean_ssim(self, true, pred):
         mean_ssim = {}
         for i in range(true.shape[1]):
-            mean_ssim[i] = SSIM(true[:,i], pred[:,i], max_val=1.0)
+            mean_ssim[i] = tf.image.ssim(true[:,i], pred[:,i], max_val=1.0)
         return np.array(list(mean_ssim.values())).mean(0).mean()
     
     def compute_mean_mse(self, true, pred):
@@ -464,19 +498,6 @@ class SpatiotemporalCO2:
         return None
 
 ############################################ UTILITIES ############################################
-def check_tensorflow_gpu():
-    sys_info = tf.sysconfig.get_build_info()
-    cuda_version, cudnn_version = sys_info['cuda_version'], sys_info['cudnn_version']
-    num_gpu_avail = len(tf.config.experimental.list_physical_devices('GPU'))
-    gpu_name = device_lib.list_local_devices()[1].physical_device_desc[17:40]
-    print('... Checking Tensorflow Version ...')
-    print('Tensorflow built with CUDA?',  tf.test.is_built_with_cuda())
-    print("TF: {} | CUDA: {} | cuDNN: {}".format(tf.__version__, cuda_version, cudnn_version))
-    print('# GPU available: {} ({})'.format(num_gpu_avail, gpu_name))
-    #print(tf.config.list_physical_devices())
-    print('--------------------------------------')
-    return None
-
 class SqueezeExcite(Layer):
     def __init__(self, ratio=4, **kwargs):
         super(SqueezeExcite, self).__init__(**kwargs)
@@ -502,8 +523,8 @@ if __name__ == '__main__':
     print('-'*80+'\n'+'Date:', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     print("Current Working Directory:", os.getcwd())
     
-    check_tensorflow_gpu()
     proxy = SpatiotemporalCO2()
+    proxy.check_tensorflow_gpu()
     proxy.__dict__
 
     proxy.load_data()
