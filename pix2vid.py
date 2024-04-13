@@ -40,6 +40,7 @@ from tensorflow.python.client import device_lib
 import keras.backend as K
 from keras import Model, regularizers
 from keras.layers import *
+from keras_cv.layers import *
 from keras.optimizers import SGD, Adam, Nadam, AdamW
 from keras.losses import MeanSquaredError, MeanAbsoluteError
 from keras.metrics import mean_squared_error as MSE
@@ -86,7 +87,6 @@ class SpatiotemporalCO2:
         self.lr_decay    = 20
         self.verbose     = 0
 
-
     def check_tf(self):
         sys_info, cuda_avail = tf.sysconfig.get_build_info(), tf.test.is_built_with_cuda()
         devices = tf.config.experimental.list_physical_devices('GPU')
@@ -103,8 +103,8 @@ class SpatiotemporalCO2:
     ################################### MODEL ARCHITECTURE ####################################
     def encoder_layer(self, inp, filt, kern=3, pad='same'):
         _ = SeparableConv2D(filt, kern, padding=pad, activity_regularizer=self.regular)(inp)
-        _ = SqueezeExcite()(_)
-        _ = BatchNormalization(axis=[0,-1])(_)
+        _ = SqueezeAndExcite2D(filt)(_)
+        _ = GroupNormalization(groups=-1)(_)
         _ = PReLU()(_)
         _ = MaxPooling2D()(_)
         _ = SpatialDropout2D(self.rnn_dropout)(_)
@@ -114,7 +114,7 @@ class SpatiotemporalCO2:
         dropout = self.rnn_dropout
         def recurrent_step(inp, filt, res, kern=3, pad='same', drop=dropout):
             y = ConvLSTM2D(filt, kern, padding=pad)(inp)
-            y = BatchNormalization()(y)
+            y = GroupNormalization(groups=-1)(y)
             y = LeakyReLU(self.leaky_slope)(y)
             y = Conv2DTranspose(filt, kern, padding=pad, strides=2)(y)
             y = SpatialDropout2D(drop)(y)
@@ -125,7 +125,7 @@ class SpatiotemporalCO2:
             return y
         def recurrent_last(inp, filt, kern=3, pad='same', drop=dropout):
             y = ConvLSTM2D(filt, kern, padding=pad)(inp)
-            y = BatchNormalization()(y)
+            y = GroupNormalization(groups=-1)(y)
             y = LeakyReLU(self.leaky_slope)(y)
             y = Conv2DTranspose(filt, kern, padding=pad, strides=2)(y)
             y = SpatialDropout2D(drop)(y)
