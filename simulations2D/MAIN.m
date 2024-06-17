@@ -1,7 +1,6 @@
 clear;clc;close all
 %% Main variables
 set(0,'DefaultFigureWindowStyle','docked')
-%set(0,'DefaultFigureWindowStyle','docked')
 
 proj_dir = 'E:/CNN-RNN-CO2/simulations2D';
 mdir = 'C:/Users/Misael Morales/OneDrive - The University of Texas at Austin/Documents/MATLAB/mrst-2022b';
