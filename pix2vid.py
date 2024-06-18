@@ -43,7 +43,7 @@ from keras.layers import *
 from keras_cv.layers import *
 from keras.optimizers import SGD, Adam, Nadam, AdamW
 from keras.losses import MeanSquaredError, MeanAbsoluteError
-from keras.metrics import mean_squared_error as MSE
+from keras.metrics import MeanSquaredError as MSE
 from keras.callbacks import LearningRateScheduler, ReduceLROnPlateau
 
 class SpatiotemporalCO2:
