@@ -146,6 +146,7 @@ class SpatiotemporalCO2:
         z1  = self.encoder_layer(inp, self.cnn_filters[0])
         z2  = self.encoder_layer(z1,  self.cnn_filters[1])
         z3  = self.encoder_layer(z2,  self.cnn_filters[2])
+        
         t0  = self.recurrent_decoder(z3, [z2,z1])
         t1  = self.recurrent_decoder(z3, [z2,z1], previous_timestep=t0)
         t2  = self.recurrent_decoder(z3, [z2,z1], previous_timestep=t1)
